@@ -57,5 +57,8 @@ class JobResponse(BaseModel):
     progress_percent: int | None = None
     stage: str | None = None
     updated_at: str | None = None
+    eta_seconds: int | None = None
+    speed_bps: int | None = None
+
 
 

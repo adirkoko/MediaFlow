@@ -38,7 +38,7 @@ class YouTubeProcessor:
         mode: str,
         quality: str,
         cookies_path: str | None = None,
-        progress_cb: Callable[[Optional[int], str], None] | None = None,
+        progress_cb: Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None = None
     ) -> ProcessResult:
         out_dir = Path(settings.outputs_dir) / job_id
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -109,7 +109,7 @@ class YouTubeProcessor:
         is_playlist: bool,
         split_title: bool,
         cookies_path: str | None,
-        progress_cb: Callable[[Optional[int], str], None] | None = None,
+        progress_cb: Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None = None
     ) -> ProcessResult:
         if is_playlist:
             outtmpl = str(out_dir / "%(title).200s.%(ext)s")
@@ -139,26 +139,26 @@ class YouTubeProcessor:
         )
 
         if progress_cb:
-            progress_cb(0, "starting")
+            progress_cb(0, "starting", None, None)
 
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([url])
 
         if progress_cb:
-            progress_cb(95, "postprocessing")
+            progress_cb(95, "postprocessing", None, None)
 
         if is_playlist:
             zip_path = out_dir / "result.zip"
             self._zip_outputs(out_dir=out_dir, zip_path=zip_path, allowed_ext={".mp3"})
         
             if progress_cb:
-                progress_cb(100, "done")
+                progress_cb(100, "done", 0, 0)
 
             return ProcessResult(output_path=zip_path, output_type="zip", is_playlist=True)
 
         fallback = self._pick_first(out_dir, exts={".mp3"})
         if progress_cb:
-            progress_cb(100, "done")
+            progress_cb(100, "done", 0, 0)
         return ProcessResult(output_path=fallback, output_type="mp3", is_playlist=False)
 
     def _download_video(
@@ -169,7 +169,7 @@ class YouTubeProcessor:
         height: Optional[int],
         split_title: bool,
         cookies_path: str | None,
-        progress_cb: Callable[[Optional[int], str], None] | None = None,
+        progress_cb: Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None = None
     ) -> ProcessResult:
         if is_playlist:
             outtmpl = str(out_dir / "%(title).200s.%(ext)s")
@@ -200,13 +200,13 @@ class YouTubeProcessor:
         )
 
         if progress_cb:
-            progress_cb(0, "starting")
+            progress_cb(0, "starting", None, None)
 
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([url])
 
         if progress_cb:
-            progress_cb(95, "postprocessing")
+            progress_cb(95, "postprocessing", None, None)
 
         if is_playlist:
             zip_path = out_dir / "result.zip"
@@ -217,13 +217,13 @@ class YouTubeProcessor:
             )
 
             if progress_cb:
-                progress_cb(100, "done")
+                progress_cb(100, "done", 0, 0)
 
             return ProcessResult(output_path=zip_path, output_type="zip", is_playlist=True)
 
         fallback = self._pick_first(out_dir, exts={".mp4", ".mkv", ".webm"})
         if progress_cb:
-            progress_cb(100, "done")
+            progress_cb(100, "done", 0, 0)
 
         return ProcessResult(
             output_path=fallback,
@@ -325,16 +325,25 @@ class YouTubeProcessor:
                 return
 
             status = d.get("status")
-            stage = "downloading" if status == "downloading" else "finalizing" if status == "finished" else "working"
-
+            if status == "finished":
+                stage = "finalizing"
+                eta_seconds = 0
+                speed_bps = 0
+            else:
+                stage = "downloading"
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             downloaded = d.get("downloaded_bytes")
+
+            eta = d.get("eta")
+            speed = d.get("speed")  # bytes/sec
+
+            eta_seconds = int(eta) if isinstance(eta, (int, float)) else None
+            speed_bps = int(speed) if isinstance(speed, (int, float)) else None
 
             percent = None
             if isinstance(total, (int, float)) and isinstance(downloaded, (int, float)) and total > 0:
                 item_pct = int(min(99, (downloaded / total) * 100))
 
-                # Playlist-aware progress (best-effort)
                 if is_playlist:
                     info = d.get("info_dict") or {}
                     idx = info.get("playlist_index")
@@ -348,5 +357,6 @@ class YouTubeProcessor:
                 else:
                     percent = item_pct
 
-            progress_cb(percent, stage)
+            progress_cb(percent, stage, eta_seconds, speed_bps)
         return hook
+

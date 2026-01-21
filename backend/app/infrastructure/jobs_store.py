@@ -24,6 +24,9 @@ class JobRecord:
     progress_percent: Optional[int]
     stage: Optional[str]
     updated_at: Optional[str]
+    eta_seconds: Optional[int]
+    speed_bps: Optional[int]
+
 
 
 
@@ -147,17 +150,28 @@ class JobsStore:
             ).fetchall()
             return [JobRecord(**dict(r)) for r in rows]
 
-    def update_progress(self, job_id: str, progress_percent: int | None, stage: str | None, updated_at: str) -> None:
+    def update_progress(
+        self,
+        job_id: str,
+        progress_percent: int | None,
+        stage: str | None,
+        updated_at: str,
+        eta_seconds: int | None = None,
+        speed_bps: int | None = None,
+    ) -> None:
         with get_conn() as conn:
             conn.execute(
                 """
                 UPDATE jobs
                 SET progress_percent = COALESCE(?, progress_percent),
                     stage = COALESCE(?, stage),
-                    updated_at = ?
+                    updated_at = ?,
+                    eta_seconds = COALESCE(?, eta_seconds),
+                    speed_bps = COALESCE(?, speed_bps)
                 WHERE job_id = ?
                 """,
-                (progress_percent, stage, updated_at, job_id),
+                (progress_percent, stage, updated_at, eta_seconds, speed_bps, job_id),
             )
             conn.commit()
+
 

@@ -35,6 +35,9 @@ def ensure_db_initialized() -> None:
         _try_add_column(conn, "jobs", "progress_percent INTEGER")
         _try_add_column(conn, "jobs", "stage TEXT")
         _try_add_column(conn, "jobs", "updated_at TEXT")
+        _try_add_column(conn, "jobs", "eta_seconds INTEGER")
+        _try_add_column(conn, "jobs", "speed_bps INTEGER")
+
 
         try:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_user_created ON jobs(user, created_at);")

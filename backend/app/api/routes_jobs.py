@@ -70,7 +70,8 @@ def get_job(job_id: str, username: str = Depends(get_current_username)) -> JobRe
         progress_percent=job.progress_percent,
         stage=job.stage,
         updated_at=job.updated_at,
-
+        eta_seconds=job.eta_seconds,
+        speed_bps=job.speed_bps,
     )
 
 
@@ -135,6 +136,9 @@ def list_jobs(username: str = Depends(get_current_username), limit: int = 50) ->
             progress_percent=j.progress_percent,
             stage=j.stage,
             updated_at=j.updated_at,
+            eta_seconds=j.eta_seconds,
+            speed_bps=j.speed_bps,
+
         )
         for j in jobs
     ]
@@ -166,6 +170,8 @@ async def job_events(job_id: str, username: str = Depends(get_current_username))
                 "error_message": j.error_message,
                 "output_filename": j.output_filename,
                 "output_type": j.output_type,
+                "eta_seconds": j.eta_seconds,
+                "speed_bps": j.speed_bps,
             }
 
             s = json.dumps(payload, ensure_ascii=False)
