@@ -69,11 +69,15 @@ backend/
       job_manager.py
       worker.py
       youtube_processor.py
+    models/
+      schemas.py
   data/
     users.json
     app.sqlite
   outputs/
-  tests/
+  README.md
+  LICENSE
+  .gitignore
   .env.example
   requirements.txt
 ```
