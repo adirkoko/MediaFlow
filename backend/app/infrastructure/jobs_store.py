@@ -21,6 +21,10 @@ class JobRecord:
     output_type: Optional[str]
     error_code: Optional[str]
     request_fingerprint: Optional[str]
+    progress_percent: Optional[int]
+    stage: Optional[str]
+    updated_at: Optional[str]
+
 
 
 class JobsStore:
@@ -74,7 +78,7 @@ class JobsStore:
                     finished_at = COALESCE(?, finished_at),
                     error_message = COALESCE(?, error_message),
                     output_filename = COALESCE(?, output_filename),
-                    output_type = COALESCE(?, output_type)
+                    output_type = COALESCE(?, output_type),
                     error_code = COALESCE(?, error_code),
                     request_fingerprint = COALESCE(?, request_fingerprint)
                 WHERE job_id = ?
@@ -127,3 +131,33 @@ class JobsStore:
                 (user, fingerprint, cutoff_iso),
             ).fetchone()
             return str(row["job_id"]) if row else None
+        
+    def list_jobs_for_user(self, user: str, limit: int = 50) -> list[JobRecord]:
+        limit = max(1, min(int(limit), 200))
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM jobs
+                WHERE user = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (user, limit),
+            ).fetchall()
+            return [JobRecord(**dict(r)) for r in rows]
+
+    def update_progress(self, job_id: str, progress_percent: int | None, stage: str | None, updated_at: str) -> None:
+        with get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE jobs
+                SET progress_percent = COALESCE(?, progress_percent),
+                    stage = COALESCE(?, stage),
+                    updated_at = ?
+                WHERE job_id = ?
+                """,
+                (progress_percent, stage, updated_at, job_id),
+            )
+            conn.commit()
+

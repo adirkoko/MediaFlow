@@ -54,4 +54,8 @@ class JobResponse(BaseModel):
     output_filename: str | None = None
     output_type: str | None = None
     error_code: str | None = None
+    progress_percent: int | None = None
+    stage: str | None = None
+    updated_at: str | None = None
+
 

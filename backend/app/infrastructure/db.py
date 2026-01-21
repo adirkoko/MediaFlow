@@ -32,14 +32,14 @@ def ensure_db_initialized() -> None:
         _try_add_column(conn, "jobs", "output_type TEXT")
         _try_add_column(conn, "jobs", "error_code TEXT")
         _try_add_column(conn, "jobs", "request_fingerprint TEXT")
+        _try_add_column(conn, "jobs", "progress_percent INTEGER")
+        _try_add_column(conn, "jobs", "stage TEXT")
+        _try_add_column(conn, "jobs", "updated_at TEXT")
 
         try:
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_jobs_user_status ON jobs(user, status);"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_jobs_fingerprint ON jobs(user, request_fingerprint, status);"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_user_created ON jobs(user, created_at);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_user_status ON jobs(user, status);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_fingerprint ON jobs(user, request_fingerprint, status);")
         except sqlite3.OperationalError:
             pass
 

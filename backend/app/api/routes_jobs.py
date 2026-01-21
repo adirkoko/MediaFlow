@@ -1,7 +1,9 @@
-from pathlib import Path
-
+import asyncio
+import json
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
+from pathlib import Path
 from app.core.exceptions import QuotaExceeded
 from app.core.deps import get_current_username
 from app.core.config import settings
@@ -62,9 +64,13 @@ def get_job(job_id: str, username: str = Depends(get_current_username)) -> JobRe
         started_at=job.started_at,
         finished_at=job.finished_at,
         error_message=job.error_message,
-        error_code=job.error_code,  # <--- Added this line
+        error_code=job.error_code,
         output_filename=job.output_filename,
         output_type=job.output_type,
+        progress_percent=job.progress_percent,
+        stage=job.stage,
+        updated_at=job.updated_at,
+
     )
 
 
@@ -106,3 +112,71 @@ def download(job_id: str, username: str = Depends(get_current_username)):
             return FileResponse(path=str(p), filename=p.name)
 
     raise HTTPException(status_code=500, detail="No downloadable output found")
+
+@router.get("", response_model=list[JobResponse])
+def list_jobs(username: str = Depends(get_current_username), limit: int = 50) -> list[JobResponse]:
+    store = JobsStore()
+    jobs = store.list_jobs_for_user(user=username, limit=limit)
+    return [
+        JobResponse(
+            job_id=j.job_id,
+            user=j.user,
+            url=j.url,
+            mode=j.mode,
+            quality=j.quality,
+            status=j.status,
+            created_at=j.created_at,
+            started_at=j.started_at,
+            finished_at=j.finished_at,
+            error_message=j.error_message,
+            output_filename=j.output_filename,
+            output_type=j.output_type,
+            error_code=j.error_code,
+            progress_percent=j.progress_percent,
+            stage=j.stage,
+            updated_at=j.updated_at,
+        )
+        for j in jobs
+    ]
+
+
+@router.get("/{job_id}/events")
+async def job_events(job_id: str, username: str = Depends(get_current_username)):
+    store = JobsStore()
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user != username:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    async def event_stream():
+        last = None
+        while True:
+            j = store.get_job(job_id)
+            if not j:
+                break
+
+            payload = {
+                "job_id": j.job_id,
+                "status": j.status,
+                "progress_percent": j.progress_percent,
+                "stage": j.stage,
+                "updated_at": j.updated_at,
+                "error_code": j.error_code,
+                "error_message": j.error_message,
+                "output_filename": j.output_filename,
+                "output_type": j.output_type,
+            }
+
+            s = json.dumps(payload, ensure_ascii=False)
+            if s != last:
+                last = s
+                yield f"data: {s}\n\n"
+
+            # stop streaming once finished
+            if j.status in ("succeeded", "failed"):
+                break
+
+            await asyncio.sleep(1)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

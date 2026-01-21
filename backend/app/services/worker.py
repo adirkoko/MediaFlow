@@ -56,8 +56,13 @@ class Worker:
                     encoding="utf-8",
                 )
 
+            def progress_cb(pct: int | None, stage: str) -> None:
+                # called from worker thread; DB connection supports it
+                self._store.update_progress(job_id, pct, stage, updated_at=_utc_now())
+
             log.info("Starting job %s for user=%s", job_id, job.user)
             self._store.update_status(job_id, "running", started_at=_utc_now())
+            self._store.update_progress(job_id, 0, "starting", updated_at=_utc_now())
 
             _append_log(
                 f"START {job_id} user={job.user} mode={job.mode} quality={job.quality}"
@@ -84,9 +89,8 @@ class Worker:
                         mode=job.mode,
                         quality=job.quality,
                         # Pass the unique cookie file path to the processor
-                        cookies_path=(
-                            str(cookies_handle.path) if cookies_handle else None
-                        ),
+                        cookies_path=(str(cookies_handle.path) if cookies_handle else None),
+                        progress_cb=progress_cb,
                     )
 
                 # Execute processor in a thread to keep the event loop responsive
@@ -94,6 +98,7 @@ class Worker:
 
                 duration_ms = int((time.perf_counter() - t0) * 1000)
                 _append_log(f"OUTPUT={result.output_path.name}")
+                self._store.update_progress(job_id, 100, "done", updated_at=_utc_now())
 
                 # Update status and clean error code on success
                 self._store.update_status(
@@ -123,7 +128,7 @@ class Worker:
 
                 # Classify exception for frontend-friendly error reporting
                 error_code = self._classify_error(e)
-
+                self._store.update_progress(job_id, None, "failed", updated_at=_utc_now())
                 self._store.update_status(
                     job_id,
                     "failed",

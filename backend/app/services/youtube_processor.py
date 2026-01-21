@@ -1,15 +1,13 @@
 from __future__ import annotations
-from pathlib import Path
-from app.core.config import settings
-
 import zipfile
+import yt_dlp
+from app.core.config import settings
+from pathlib import Path
+from typing import Callable, Optional
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-import yt_dlp
-
-from app.core.config import settings
 
 
 @dataclass(frozen=True)
@@ -40,6 +38,7 @@ class YouTubeProcessor:
         mode: str,
         quality: str,
         cookies_path: str | None = None,
+        progress_cb: Callable[[Optional[int], str], None] | None = None,
     ) -> ProcessResult:
         out_dir = Path(settings.outputs_dir) / job_id
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -61,6 +60,7 @@ class YouTubeProcessor:
                 is_playlist=is_playlist,
                 split_title=split_title,
                 cookies_path=cookies_path,
+                progress_cb=progress_cb,
             )
         if mode == "video":
             return self._download_video(
@@ -70,13 +70,13 @@ class YouTubeProcessor:
                 height=height,
                 split_title=split_title,
                 cookies_path=cookies_path,
+                progress_cb=progress_cb,
             )
 
         raise ValueError(f"Unsupported mode: {mode}")
 
     def _common_opts(
-        self, outtmpl: str, noplaylist: bool, cookies_path: str | None
-    ) -> dict:
+        self, outtmpl: str, noplaylist: bool, cookies_path: str | None, progress_hook=None) -> dict:
         ffmpeg_bin = Path.cwd() / "bin" / "ffmpeg.exe"
 
         opts = {
@@ -97,6 +97,9 @@ class YouTubeProcessor:
             opts["writethumbnail"] = True
             opts["convertthumbnails"] = settings.thumbnail_convert_format
 
+        if progress_hook:
+            opts["progress_hooks"] = [progress_hook]
+
         return opts
 
     def _download_audio(
@@ -106,6 +109,7 @@ class YouTubeProcessor:
         is_playlist: bool,
         split_title: bool,
         cookies_path: str | None,
+        progress_cb: Callable[[Optional[int], str], None] | None = None,
     ) -> ProcessResult:
         if is_playlist:
             outtmpl = str(out_dir / "%(playlist_index)s-%(title).200s.%(ext)s")
@@ -114,9 +118,8 @@ class YouTubeProcessor:
             outtmpl = str(out_dir / "%(title).200s.%(ext)s")
             noplaylist = True
 
-        opts = self._common_opts(
-            outtmpl=outtmpl, noplaylist=noplaylist, cookies_path=cookies_path
-        )
+        hook = self._build_progress_hook(progress_cb, is_playlist=is_playlist)
+        opts = self._common_opts(outtmpl=outtmpl, noplaylist=noplaylist, cookies_path=cookies_path, progress_hook=hook)
         opts["parse_metadata"] = self._parse_metadata_rules(split_title)
 
         # Best audio + convert to mp3 via FFmpeg
@@ -135,17 +138,27 @@ class YouTubeProcessor:
             }
         )
 
+        if progress_cb:
+            progress_cb(0, "starting")
+
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([url])
+
+        if progress_cb:
+            progress_cb(95, "postprocessing")
 
         if is_playlist:
             zip_path = out_dir / "result.zip"
             self._zip_outputs(out_dir=out_dir, zip_path=zip_path, allowed_ext={".mp3"})
-            return ProcessResult(
-                output_path=zip_path, output_type="zip", is_playlist=True
-            )
+        
+            if progress_cb:
+                progress_cb(100, "done")
+
+            return ProcessResult(output_path=zip_path, output_type="zip", is_playlist=True)
 
         fallback = self._pick_first(out_dir, exts={".mp3"})
+        if progress_cb:
+            progress_cb(100, "done")
         return ProcessResult(output_path=fallback, output_type="mp3", is_playlist=False)
 
     def _download_video(
@@ -156,6 +169,7 @@ class YouTubeProcessor:
         height: Optional[int],
         split_title: bool,
         cookies_path: str | None,
+        progress_cb: Callable[[Optional[int], str], None] | None = None,
     ) -> ProcessResult:
         if is_playlist:
             outtmpl = str(out_dir / "%(playlist_index)s-%(title).200s.%(ext)s")
@@ -170,9 +184,9 @@ class YouTubeProcessor:
         else:
             fmt = "bv*+ba/b"
 
-        opts = self._common_opts(
-            outtmpl=outtmpl, noplaylist=noplaylist, cookies_path=cookies_path
-        )
+        hook = self._build_progress_hook(progress_cb, is_playlist=is_playlist)
+        opts = self._common_opts(outtmpl=outtmpl, noplaylist=noplaylist, cookies_path=cookies_path, progress_hook=hook)
+
         opts["parse_metadata"] = self._parse_metadata_rules(split_title)
 
         opts.update(
@@ -185,8 +199,14 @@ class YouTubeProcessor:
             }
         )
 
+        if progress_cb:
+            progress_cb(0, "starting")
+
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([url])
+
+        if progress_cb:
+            progress_cb(95, "postprocessing")
 
         if is_playlist:
             zip_path = out_dir / "result.zip"
@@ -195,11 +215,16 @@ class YouTubeProcessor:
                 zip_path=zip_path,
                 allowed_ext={".mp4", ".mkv", ".webm"},
             )
-            return ProcessResult(
-                output_path=zip_path, output_type="zip", is_playlist=True
-            )
+
+            if progress_cb:
+                progress_cb(100, "done")
+
+            return ProcessResult(output_path=zip_path, output_type="zip", is_playlist=True)
 
         fallback = self._pick_first(out_dir, exts={".mp4", ".mkv", ".webm"})
+        if progress_cb:
+            progress_cb(100, "done")
+
         return ProcessResult(
             output_path=fallback,
             output_type=fallback.suffix.lower().lstrip("."),
@@ -293,3 +318,35 @@ class YouTubeProcessor:
             "uploader:%(album_artist)s",
         ]
         return rules
+
+    def _build_progress_hook(self, progress_cb, is_playlist: bool):
+        def hook(d: dict):
+            if not progress_cb:
+                return
+
+            status = d.get("status")
+            stage = "downloading" if status == "downloading" else "finalizing" if status == "finished" else "working"
+
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            downloaded = d.get("downloaded_bytes")
+
+            percent = None
+            if isinstance(total, (int, float)) and isinstance(downloaded, (int, float)) and total > 0:
+                item_pct = int(min(99, (downloaded / total) * 100))
+
+                # Playlist-aware progress (best-effort)
+                if is_playlist:
+                    info = d.get("info_dict") or {}
+                    idx = info.get("playlist_index")
+                    n = info.get("n_entries") or info.get("playlist_count")
+                    if isinstance(idx, int) and isinstance(n, int) and n > 0:
+                        overall = ((idx - 1) + (item_pct / 100.0)) / n * 100.0
+                        percent = int(min(99, overall))
+                        stage = f"downloading item {idx}/{n}"
+                    else:
+                        percent = item_pct
+                else:
+                    percent = item_pct
+
+            progress_cb(percent, stage)
+        return hook
