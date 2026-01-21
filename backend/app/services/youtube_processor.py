@@ -41,19 +41,14 @@ class YouTubeProcessor:
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
             info = ydl.extract_info(url, download=False)
 
-        is_playlist = bool(
-            info and (info.get("_type") == "playlist" or info.get("entries"))
-        )
+        is_playlist = bool(info and (info.get("_type") == "playlist" or info.get("entries")))
+        split_title = self._should_split_title(info or {}, url, is_playlist)
         height = _parse_quality_to_height(quality)
 
         if mode == "audio":
-            return self._download_audio(
-                url=url, out_dir=out_dir, is_playlist=is_playlist
-            )
+            return self._download_audio(url=url, out_dir=out_dir, is_playlist=is_playlist, split_title=split_title)
         if mode == "video":
-            return self._download_video(
-                url=url, out_dir=out_dir, is_playlist=is_playlist, height=height
-            )
+            return self._download_video(url=url, out_dir=out_dir, is_playlist=is_playlist, height=height, split_title=split_title)
 
         raise ValueError(f"Unsupported mode: {mode}")
 
@@ -84,7 +79,7 @@ class YouTubeProcessor:
         return opts
 
     def _download_audio(
-        self, url: str, out_dir: Path, is_playlist: bool
+        self, url: str, out_dir: Path, is_playlist: bool, split_title: bool
     ) -> ProcessResult:
         if is_playlist:
             outtmpl = str(out_dir / "%(playlist_index)s-%(title).200s.%(ext)s")
@@ -95,6 +90,8 @@ class YouTubeProcessor:
 
         opts = self._common_opts(outtmpl=outtmpl, noplaylist=noplaylist)
         opts["parse_metadata"] = self._parse_metadata_rules()
+        opts["parse_metadata"] = self._parse_metadata_rules(split_title)
+
         # Best audio + convert to mp3 via FFmpeg
         opts.update(
             {
@@ -126,7 +123,7 @@ class YouTubeProcessor:
 
 
     def _download_video(
-        self, url: str, out_dir: Path, is_playlist: bool, height: Optional[int]
+        self, url: str, out_dir: Path, is_playlist: bool, height: Optional[int], split_title: bool
     ) -> ProcessResult:
         if is_playlist:
             outtmpl = str(out_dir / "%(playlist_index)s-%(title).200s.%(ext)s")
@@ -143,6 +140,8 @@ class YouTubeProcessor:
 
         opts = self._common_opts(outtmpl=outtmpl, noplaylist=noplaylist)
         opts["parse_metadata"] = self._parse_metadata_rules()
+        opts["parse_metadata"] = self._parse_metadata_rules(split_title)
+
         opts.update(
             {
                 "format": fmt,
@@ -218,13 +217,38 @@ class YouTubeProcessor:
 
         return pps
 
-    def _parse_metadata_rules(self) -> list[str]:
-        return [
-            # If title looks like "Artist - Title" parse it
-            "title:%(artist)s - %(title)s",  # official example :contentReference[oaicite:6]{index=6}
-            # Playlist mapping
+    def _should_split_title(self, info: dict, url: str, is_playlist: bool) -> bool:
+        # Conservative: don't split titles inside playlists (avoid breaking mixed content)
+        if is_playlist:
+            return False
+
+        # If extractor already provided structured music metadata, do NOT override it
+        if info.get("artist") or info.get("album") or info.get("track") or info.get("album_artist"):
+            return False
+        if info.get("artists"):  # sometimes list of artists exists
+            return False
+
+        # YouTube Music URLs are more likely to have real artist/track data
+        if "music.youtube.com" in url.lower():
+            return False
+
+        title = (info.get("title") or "").strip()
+        # Only split when it really looks like "Artist - Title"
+        return " - " in title and len(title) >= 5
+
+
+    def _parse_metadata_rules(self, split_title: bool) -> list[str]:
+        rules: list[str] = []
+
+        # Only apply this if we decided it's safe. This avoids overriding existing artist.
+        if split_title:
+            rules.append("title:%(artist)s - %(title)s")  # official example :contentReference[oaicite:1]{index=1}
+
+        # Playlist mapping (safe even for single; fields just won't exist)
+        rules += [
             "playlist_title:%(album)s",
             "playlist_index:%(track_number)s",
-            # Album artist fallback
             "uploader:%(album_artist)s",
         ]
+        return rules
+
