@@ -1,6 +1,5 @@
 import sqlite3
 from pathlib import Path
-from typing import Iterator
 
 from app.core.config import settings
 
@@ -27,7 +26,35 @@ def ensure_db_initialized() -> None:
             );
             """
         )
+
+        # Lightweight migrations (ADD COLUMN if missing)
+        _try_add_column(conn, "jobs", "output_filename TEXT")
+        _try_add_column(conn, "jobs", "output_type TEXT")
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS usage_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                is_playlist INTEGER NOT NULL,
+                duration_ms INTEGER,
+                success INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+
         conn.commit()
+
+
+def _try_add_column(conn: sqlite3.Connection, table: str, col_def: str) -> None:
+    # col_def example: "output_filename TEXT"
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_def};")
+    except sqlite3.OperationalError:
+        # most likely "duplicate column name"
+        pass
 
 
 def get_conn() -> sqlite3.Connection:

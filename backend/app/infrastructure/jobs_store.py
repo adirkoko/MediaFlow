@@ -18,6 +18,8 @@ class JobRecord:
     started_at: Optional[str]
     finished_at: Optional[str]
     error_message: Optional[str]
+    output_filename: Optional[str]
+    output_type: Optional[str]
 
 
 class JobsStore:
@@ -43,7 +45,9 @@ class JobsStore:
 
     def get_job(self, job_id: str) -> Optional[JobRecord]:
         with get_conn() as conn:
-            row = conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
             if not row:
                 return None
             return JobRecord(**dict(row))
@@ -55,6 +59,8 @@ class JobsStore:
         started_at: Optional[str] = None,
         finished_at: Optional[str] = None,
         error_message: Optional[str] = None,
+        output_filename: Optional[str] = None,
+        output_type: Optional[str] = None,
     ) -> None:
         with get_conn() as conn:
             conn.execute(
@@ -63,9 +69,19 @@ class JobsStore:
                 SET status = ?,
                     started_at = COALESCE(?, started_at),
                     finished_at = COALESCE(?, finished_at),
-                    error_message = COALESCE(?, error_message)
+                    error_message = COALESCE(?, error_message),
+                    output_filename = COALESCE(?, output_filename),
+                    output_type = COALESCE(?, output_type)
                 WHERE job_id = ?
                 """,
-                (status, started_at, finished_at, error_message, job_id),
+                (
+                    status,
+                    started_at,
+                    finished_at,
+                    error_message,
+                    output_filename,
+                    output_type,
+                    job_id,
+                ),
             )
             conn.commit()

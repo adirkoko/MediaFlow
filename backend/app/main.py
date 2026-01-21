@@ -9,6 +9,8 @@ from app.core.logging import setup_logging
 from app.infrastructure.db import ensure_db_initialized
 from app.services.job_manager import JobManager
 from app.services.worker import Worker
+from app.api.routes_usage import router as usage_router
+from app.services.cleanup import OutputsCleaner
 
 setup_logging()
 
@@ -18,6 +20,7 @@ app = FastAPI(title=settings.app_name)
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(jobs_router)
+app.include_router(usage_router)
 
 # Singletons attached to app.state
 app.state.manager = JobManager()
@@ -33,14 +36,24 @@ async def on_startup() -> None:
     ensure_db_initialized()
     # Ensure outputs dir exists
     import os
+
     os.makedirs(settings.outputs_dir, exist_ok=True)
 
     worker = Worker(app.state.manager)
     app.state.worker_task = asyncio.create_task(worker.run_forever())
 
+    cleaner = OutputsCleaner()
+    app.state.cleanup_task = asyncio.create_task(cleaner.run_forever())
+
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
-    task = app.state.worker_task
-    if task:
-        task.cancel()
+    # Safely cancel worker task if it exists
+    worker_task = getattr(app.state, "worker_task", None)
+    if worker_task:
+        worker_task.cancel()
+
+    # Safely cancel cleanup task if it exists
+    cleanup_task = getattr(app.state, "cleanup_task", None)
+    if cleanup_task:
+        cleanup_task.cancel()

@@ -21,5 +21,14 @@ class Settings(BaseSettings):
     max_parallel_jobs: int = 2
     queue_max_size: int = 50
 
+    # Output cleanup
+    outputs_ttl_hours: int = 24
+    outputs_cleanup_interval_minutes: int = 60
+
+    # Metadata embedding
+    embed_metadata: bool = True
+    embed_thumbnail: bool = True
+    thumbnail_convert_format: str = "jpg"  # "jpg" is recommended for compatibility
+
 
 settings = Settings()

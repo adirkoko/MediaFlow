@@ -48,6 +48,8 @@ def get_job(job_id: str, username: str = Depends(get_current_username)) -> JobRe
         started_at=job.started_at,
         finished_at=job.finished_at,
         error_message=job.error_message,
+        output_filename=job.output_filename,
+        output_type=job.output_type,
     )
 
 
@@ -68,7 +70,12 @@ def download(job_id: str, username: str = Depends(get_current_username)):
     if not out_dir.exists():
         raise HTTPException(status_code=500, detail="Output missing")
 
-    # Prefer deterministic names we produce
+    if job.output_filename:
+        p = out_dir / job.output_filename
+        if p.exists():
+            return FileResponse(path=str(p), filename=p.name)
+
+    # Prefer deterministic nameשs we produce
     candidates = [
         out_dir / "result.mp3",
         out_dir / "result.mp4",

@@ -50,3 +50,5 @@ class JobResponse(BaseModel):
     started_at: str | None = None
     finished_at: str | None = None
     error_message: str | None = None
+    output_filename: str | None = None
+    output_type: str | None = None
