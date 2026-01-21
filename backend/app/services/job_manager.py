@@ -1,8 +1,11 @@
 import asyncio
 import uuid
+import hashlib
+
+from app.core.config import settings
+from app.core.exceptions import QuotaExceeded
 from dataclasses import dataclass
 from datetime import datetime, timezone
-
 from app.core.config import settings
 from app.infrastructure.jobs_store import JobsStore
 
@@ -14,14 +17,34 @@ class EnqueuedJob:
 
 class JobManager:
     def __init__(self) -> None:
-        self._queue: asyncio.Queue[EnqueuedJob] = asyncio.Queue(maxsize=settings.queue_max_size)
+        self._queue: asyncio.Queue[EnqueuedJob] = asyncio.Queue(
+            maxsize=settings.queue_max_size
+        )
         self._store = JobsStore()
 
     @property
     def queue(self) -> asyncio.Queue[EnqueuedJob]:
         return self._queue
 
-    def create_job(self, user: str, url: str, mode: str, quality: str) -> str:
+    def create_job(
+        self, user: str, url: str, mode: str, quality: str
+    ) -> tuple[str, bool]:
+        # Quota check
+        active = self._store.count_active_jobs_for_user(user)
+        if active >= settings.max_active_jobs_per_user:
+            raise QuotaExceeded(
+                f"Too many active jobs (limit={settings.max_active_jobs_per_user})"
+            )
+
+        fp = self._fingerprint(user, url, mode, quality)
+
+        # Dedup check
+        dup = self._store.find_duplicate_active_job(
+            user=user, fingerprint=fp, window_minutes=settings.dedup_window_minutes
+        )
+        if dup:
+            return dup, True
+
         job_id = uuid.uuid4().hex
         created_at = datetime.now(timezone.utc).isoformat()
         self._store.create_job(
@@ -33,7 +56,15 @@ class JobManager:
             status="queued",
             created_at=created_at,
         )
-        return job_id
+
+        # Persist fingerprint immediately
+        self._store.update_status(job_id, "queued", request_fingerprint=fp)
+
+        return job_id, False
 
     async def enqueue(self, job_id: str) -> None:
         await self._queue.put(EnqueuedJob(job_id=job_id))
+
+    def _fingerprint(self, user: str, url: str, mode: str, quality: str) -> str:
+        key = f"{user}|{url.strip()}|{mode}|{quality.strip().lower()}"
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()

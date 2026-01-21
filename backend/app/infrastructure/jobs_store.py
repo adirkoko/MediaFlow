@@ -1,8 +1,7 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Optional
-
+from datetime import datetime, timedelta, timezone
 from app.infrastructure.db import get_conn
 
 
@@ -20,6 +19,8 @@ class JobRecord:
     error_message: Optional[str]
     output_filename: Optional[str]
     output_type: Optional[str]
+    error_code: Optional[str]
+    request_fingerprint: Optional[str]
 
 
 class JobsStore:
@@ -61,6 +62,8 @@ class JobsStore:
         error_message: Optional[str] = None,
         output_filename: Optional[str] = None,
         output_type: Optional[str] = None,
+        error_code: Optional[str] = None,
+        request_fingerprint: Optional[str] = None,
     ) -> None:
         with get_conn() as conn:
             conn.execute(
@@ -72,6 +75,8 @@ class JobsStore:
                     error_message = COALESCE(?, error_message),
                     output_filename = COALESCE(?, output_filename),
                     output_type = COALESCE(?, output_type)
+                    error_code = COALESCE(?, error_code),
+                    request_fingerprint = COALESCE(?, request_fingerprint)
                 WHERE job_id = ?
                 """,
                 (
@@ -81,7 +86,44 @@ class JobsStore:
                     error_message,
                     output_filename,
                     output_type,
+                    error_code,
+                    request_fingerprint,
                     job_id,
                 ),
             )
             conn.commit()
+
+    def count_active_jobs_for_user(self, user: str) -> int:
+        with get_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS c
+                FROM jobs
+                WHERE user = ?
+                  AND status IN ('queued', 'running')
+                """,
+                (user,),
+            ).fetchone()
+            return int(row["c"])
+
+    def find_duplicate_active_job(
+        self, user: str, fingerprint: str, window_minutes: int
+    ) -> str | None:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=max(1, window_minutes))
+        cutoff_iso = cutoff.isoformat()
+
+        with get_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT job_id
+                FROM jobs
+                WHERE user = ?
+                  AND request_fingerprint = ?
+                  AND status IN ('queued', 'running')
+                  AND created_at >= ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (user, fingerprint, cutoff_iso),
+            ).fetchone()
+            return str(row["job_id"]) if row else None

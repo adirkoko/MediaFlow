@@ -30,6 +30,18 @@ def ensure_db_initialized() -> None:
         # Lightweight migrations (ADD COLUMN if missing)
         _try_add_column(conn, "jobs", "output_filename TEXT")
         _try_add_column(conn, "jobs", "output_type TEXT")
+        _try_add_column(conn, "jobs", "error_code TEXT")
+        _try_add_column(conn, "jobs", "request_fingerprint TEXT")
+
+        try:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_user_status ON jobs(user, status);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_fingerprint ON jobs(user, request_fingerprint, status);"
+            )
+        except sqlite3.OperationalError:
+            pass
 
         conn.execute(
             """

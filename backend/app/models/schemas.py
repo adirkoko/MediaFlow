@@ -37,6 +37,7 @@ class CreateJobRequest(BaseModel):
 class CreateJobResponse(BaseModel):
     job_id: str
     status: JobStatus
+    reused: bool = False
 
 
 class JobResponse(BaseModel):
@@ -52,3 +53,5 @@ class JobResponse(BaseModel):
     error_message: str | None = None
     output_filename: str | None = None
     output_type: str | None = None
+    error_code: str | None = None
+

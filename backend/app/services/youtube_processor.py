@@ -33,7 +33,14 @@ def _parse_quality_to_height(quality: str) -> Optional[int]:
 
 
 class YouTubeProcessor:
-    def process(self, job_id: str, url: str, mode: str, quality: str) -> ProcessResult:
+    def process(
+        self,
+        job_id: str,
+        url: str,
+        mode: str,
+        quality: str,
+        cookies_path: str | None = None,
+    ) -> ProcessResult:
         out_dir = Path(settings.outputs_dir) / job_id
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -41,45 +48,64 @@ class YouTubeProcessor:
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
             info = ydl.extract_info(url, download=False)
 
-        is_playlist = bool(info and (info.get("_type") == "playlist" or info.get("entries")))
+        is_playlist = bool(
+            info and (info.get("_type") == "playlist" or info.get("entries"))
+        )
         split_title = self._should_split_title(info or {}, url, is_playlist)
         height = _parse_quality_to_height(quality)
 
         if mode == "audio":
-            return self._download_audio(url=url, out_dir=out_dir, is_playlist=is_playlist, split_title=split_title)
+            return self._download_audio(
+                url=url,
+                out_dir=out_dir,
+                is_playlist=is_playlist,
+                split_title=split_title,
+                cookies_path=cookies_path,
+            )
         if mode == "video":
-            return self._download_video(url=url, out_dir=out_dir, is_playlist=is_playlist, height=height, split_title=split_title)
+            return self._download_video(
+                url=url,
+                out_dir=out_dir,
+                is_playlist=is_playlist,
+                height=height,
+                split_title=split_title,
+                cookies_path=cookies_path,
+            )
 
         raise ValueError(f"Unsupported mode: {mode}")
 
-    def _common_opts(self, outtmpl: str, noplaylist: bool) -> dict:
+    def _common_opts(
+        self, outtmpl: str, noplaylist: bool, cookies_path: str | None
+    ) -> dict:
         ffmpeg_bin = Path.cwd() / "bin" / "ffmpeg.exe"
 
         opts = {
             "outtmpl": outtmpl,
             "noplaylist": noplaylist,
-            "restrictfilenames": False,  # Disable the aggressive ASCII-only filter
-            "windowsfilenames": True,  # Enable smart Windows-compatible naming
+            "windowsfilenames": True,
+            "restrictfilenames": False,
             "quiet": True,
             "no_warnings": True,
             "retries": 3,
             "ffmpeg_location": str(ffmpeg_bin),
-            "writethumbnail": True,
-            "convertthumbnails": "jpg",
         }
 
-        # Thumbnail handling (needed for cover art)
+        if cookies_path:
+            opts["cookiefile"] = cookies_path
+
         if settings.embed_thumbnail:
-            opts["writethumbnail"] = (
-                True  # download thumbnail file :contentReference[oaicite:3]{index=3}
-            )
-            # Convert thumbnail for better compatibility (webp -> jpg/png) :contentReference[oaicite:4]{index=4}
+            opts["writethumbnail"] = True
             opts["convertthumbnails"] = settings.thumbnail_convert_format
 
         return opts
 
     def _download_audio(
-        self, url: str, out_dir: Path, is_playlist: bool, split_title: bool
+        self,
+        url: str,
+        out_dir: Path,
+        is_playlist: bool,
+        split_title: bool,
+        cookies_path: str | None,
     ) -> ProcessResult:
         if is_playlist:
             outtmpl = str(out_dir / "%(playlist_index)s-%(title).200s.%(ext)s")
@@ -88,8 +114,9 @@ class YouTubeProcessor:
             outtmpl = str(out_dir / "%(title).200s.%(ext)s")
             noplaylist = True
 
-        opts = self._common_opts(outtmpl=outtmpl, noplaylist=noplaylist)
-        opts["parse_metadata"] = self._parse_metadata_rules()
+        opts = self._common_opts(
+            outtmpl=outtmpl, noplaylist=noplaylist, cookies_path=cookies_path
+        )
         opts["parse_metadata"] = self._parse_metadata_rules(split_title)
 
         # Best audio + convert to mp3 via FFmpeg
@@ -121,9 +148,14 @@ class YouTubeProcessor:
         fallback = self._pick_first(out_dir, exts={".mp3"})
         return ProcessResult(output_path=fallback, output_type="mp3", is_playlist=False)
 
-
     def _download_video(
-        self, url: str, out_dir: Path, is_playlist: bool, height: Optional[int], split_title: bool
+        self,
+        url: str,
+        out_dir: Path,
+        is_playlist: bool,
+        height: Optional[int],
+        split_title: bool,
+        cookies_path: str | None,
     ) -> ProcessResult:
         if is_playlist:
             outtmpl = str(out_dir / "%(playlist_index)s-%(title).200s.%(ext)s")
@@ -138,8 +170,9 @@ class YouTubeProcessor:
         else:
             fmt = "bv*+ba/b"
 
-        opts = self._common_opts(outtmpl=outtmpl, noplaylist=noplaylist)
-        opts["parse_metadata"] = self._parse_metadata_rules()
+        opts = self._common_opts(
+            outtmpl=outtmpl, noplaylist=noplaylist, cookies_path=cookies_path
+        )
         opts["parse_metadata"] = self._parse_metadata_rules(split_title)
 
         opts.update(
@@ -167,8 +200,11 @@ class YouTubeProcessor:
             )
 
         fallback = self._pick_first(out_dir, exts={".mp4", ".mkv", ".webm"})
-        return ProcessResult(output_path=fallback, output_type=fallback.suffix.lower().lstrip("."), is_playlist=False)
-
+        return ProcessResult(
+            output_path=fallback,
+            output_type=fallback.suffix.lower().lstrip("."),
+            is_playlist=False,
+        )
 
     def _zip_outputs(
         self, out_dir: Path, zip_path: Path, allowed_ext: set[str]
@@ -223,7 +259,12 @@ class YouTubeProcessor:
             return False
 
         # If extractor already provided structured music metadata, do NOT override it
-        if info.get("artist") or info.get("album") or info.get("track") or info.get("album_artist"):
+        if (
+            info.get("artist")
+            or info.get("album")
+            or info.get("track")
+            or info.get("album_artist")
+        ):
             return False
         if info.get("artists"):  # sometimes list of artists exists
             return False
@@ -236,13 +277,14 @@ class YouTubeProcessor:
         # Only split when it really looks like "Artist - Title"
         return " - " in title and len(title) >= 5
 
-
     def _parse_metadata_rules(self, split_title: bool) -> list[str]:
         rules: list[str] = []
 
         # Only apply this if we decided it's safe. This avoids overriding existing artist.
         if split_title:
-            rules.append("title:%(artist)s - %(title)s")  # official example :contentReference[oaicite:1]{index=1}
+            rules.append(
+                "title:%(artist)s - %(title)s"
+            )  # official example :contentReference[oaicite:1]{index=1}
 
         # Playlist mapping (safe even for single; fields just won't exist)
         rules += [
@@ -251,4 +293,3 @@ class YouTubeProcessor:
             "uploader:%(album_artist)s",
         ]
         return rules
-

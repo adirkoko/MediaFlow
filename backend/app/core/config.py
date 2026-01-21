@@ -30,5 +30,15 @@ class Settings(BaseSettings):
     embed_thumbnail: bool = True
     thumbnail_convert_format: str = "jpg"  # "jpg" is recommended for compatibility
 
+    # Quota & dedup
+    max_active_jobs_per_user: int = 2
+    dedup_window_minutes: int = 60  # within this window, same request reuses existing job
+
+    # Backoff
+    max_attempts: int = 4
+    backoff_base_seconds: float = 2.0
+
+    # Optional cookies (for legit authenticated access)
+    cookies_file: str | None = None  # set in .env as an absolute path
 
 settings = Settings()
