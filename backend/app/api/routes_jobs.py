@@ -20,7 +20,9 @@ async def create_job(
     from app.main import get_manager  # noqa
 
     manager = get_manager()
-    job_id = manager.create_job(user=username, url=payload.url, mode=payload.mode.value, quality=payload.quality)
+    job_id = manager.create_job(
+        user=username, url=payload.url, mode=payload.mode.value, quality=payload.quality
+    )
     await manager.enqueue(job_id)
 
     return CreateJobResponse(job_id=job_id, status="queued")
@@ -58,10 +60,35 @@ def download(job_id: str, username: str = Depends(get_current_username)):
     if job.user != username:
         raise HTTPException(status_code=403, detail="Forbidden")
     if job.status != "succeeded":
-        raise HTTPException(status_code=409, detail=f"Job not ready (status={job.status})")
+        raise HTTPException(
+            status_code=409, detail=f"Job not ready (status={job.status})"
+        )
 
-    result_path = Path(settings.outputs_dir) / job_id / "result.txt"
-    if not result_path.exists():
+    out_dir = Path(settings.outputs_dir) / job_id
+    if not out_dir.exists():
         raise HTTPException(status_code=500, detail="Output missing")
 
-    return FileResponse(path=str(result_path), filename=f"{job_id}.txt")
+    # Prefer deterministic names we produce
+    candidates = [
+        out_dir / "result.mp3",
+        out_dir / "result.mp4",
+        out_dir / "result.mkv",
+        out_dir / "result.webm",
+        out_dir / "result.zip",
+    ]
+    for p in candidates:
+        if p.exists():
+            return FileResponse(path=str(p), filename=p.name)
+
+    # Fallback: return the first relevant file
+    for p in out_dir.iterdir():
+        if p.is_file() and p.suffix.lower() in {
+            ".mp3",
+            ".mp4",
+            ".mkv",
+            ".webm",
+            ".zip",
+        }:
+            return FileResponse(path=str(p), filename=p.name)
+
+    raise HTTPException(status_code=500, detail="No downloadable output found")

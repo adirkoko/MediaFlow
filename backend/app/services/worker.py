@@ -6,6 +6,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.infrastructure.jobs_store import JobsStore
 from app.services.job_manager import JobManager
+from app.services.youtube_processor import YouTubeProcessor
 
 log = logging.getLogger("worker")
 
@@ -19,6 +20,7 @@ class Worker:
         self._manager = manager
         self._store = JobsStore()
         self._semaphore = asyncio.Semaphore(settings.max_parallel_jobs)
+        self._processor = YouTubeProcessor()
 
     async def run_forever(self) -> None:
         log.info("Worker started (max_parallel_jobs=%s)", settings.max_parallel_jobs)
@@ -33,26 +35,42 @@ class Worker:
                 log.warning("Job not found: %s", job_id)
                 return
 
-            log.info("Starting job %s for user=%s", job_id, job.user)
-            self._store.update_status(job_id, "running", started_at=_utc_now())
+            out_dir = Path(settings.outputs_dir) / job_id
+            out_dir.mkdir(parents=True, exist_ok=True)
+            job_log = out_dir / "job.log"
 
-            try:
-                # Stub processing: simulate work + generate an output file.
-                await asyncio.sleep(3)
-
-                out_dir = Path(settings.outputs_dir) / job_id
-                out_dir.mkdir(parents=True, exist_ok=True)
-
-                # For now: create a simple result file. Later we will generate mp3/mp4.
-                result_path = out_dir / "result.txt"
-                result_path.write_text(
-                    f"job_id={job_id}\nuser={job.user}\nurl={job.url}\nmode={job.mode}\nquality={job.quality}\n",
+            def _append_log(line: str) -> None:
+                job_log.write_text(
+                    (job_log.read_text(encoding="utf-8") if job_log.exists() else "")
+                    + line
+                    + "\n",
                     encoding="utf-8",
                 )
 
+            log.info("Starting job %s for user=%s", job_id, job.user)
+            self._store.update_status(job_id, "running", started_at=_utc_now())
+            _append_log(
+                f"START {job_id} user={job.user} mode={job.mode} quality={job.quality}"
+            )
+            _append_log(f"url={job.url}")
+
+            try:
+                # Run blocking processing in a thread to avoid blocking the event loop
+                result = await asyncio.to_thread(
+                    self._processor.process,
+                    job_id,
+                    job.url,
+                    job.mode,
+                    job.quality,
+                )
+
+                _append_log(f"OUTPUT={result.output_path.name}")
                 self._store.update_status(job_id, "succeeded", finished_at=_utc_now())
                 log.info("Job %s succeeded", job_id)
 
             except Exception as e:
                 log.exception("Job %s failed", job_id)
-                self._store.update_status(job_id, "failed", finished_at=_utc_now(), error_message=str(e))
+                _append_log(f"ERROR={type(e).__name__}: {e}")
+                self._store.update_status(
+                    job_id, "failed", finished_at=_utc_now(), error_message=str(e)
+                )
