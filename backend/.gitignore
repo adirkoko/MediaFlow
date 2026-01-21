@@ -1,5 +1,18 @@
-.venv/
+# Python
 __pycache__/
 *.pyc
+.venv/
+
+# Secrets
 .env
+
+# Database
+*.sqlite
+data/
+
+# Media/Downloads
 outputs/
+
+# OS
+.DS_Store
+Thumbs.db

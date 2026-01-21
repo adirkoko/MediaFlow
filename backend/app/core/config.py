@@ -14,6 +14,12 @@ class Settings(BaseSettings):
 
     # Paths
     users_file: str = "data/users.json"
+    db_path: str = "data/app.sqlite"
+    outputs_dir: str = "outputs"
+
+    # Load / concurrency control
+    max_parallel_jobs: int = 2
+    queue_max_size: int = 50
 
 
 settings = Settings()
