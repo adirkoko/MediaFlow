@@ -112,7 +112,7 @@ class YouTubeProcessor:
         progress_cb: Callable[[Optional[int], str], None] | None = None,
     ) -> ProcessResult:
         if is_playlist:
-            outtmpl = str(out_dir / "%(playlist_index)s-%(title).200s.%(ext)s")
+            outtmpl = str(out_dir / "%(title).200s.%(ext)s")
             noplaylist = False
         else:
             outtmpl = str(out_dir / "%(title).200s.%(ext)s")
@@ -172,7 +172,7 @@ class YouTubeProcessor:
         progress_cb: Callable[[Optional[int], str], None] | None = None,
     ) -> ProcessResult:
         if is_playlist:
-            outtmpl = str(out_dir / "%(playlist_index)s-%(title).200s.%(ext)s")
+            outtmpl = str(out_dir / "%(title).200s.%(ext)s")
             noplaylist = False
         else:
             outtmpl = str(out_dir / "%(title).200s.%(ext)s")
