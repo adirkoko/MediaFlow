@@ -1,13 +1,15 @@
 from __future__ import annotations
-import zipfile
+
 import yt_dlp
-from app.core.config import settings
-from pathlib import Path
-from typing import Callable, Optional
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
+from app.core.config import settings
+from app.services.packaging import OutputPackager
+from app.services.reporting import ReportWriter, PlaylistReport, PlaylistFailure
+from app.core.exceptions import AllPlaylistItemsFailed
+from app.services.error_codes import classify_error  # reuse your classifier
 
 
 @dataclass(frozen=True)
@@ -19,8 +21,8 @@ class ProcessResult:
 
 def _parse_quality_to_height(quality: str) -> Optional[int]:
     """
-    Accepts values like: "best", "720p", "1080", "480p"
-    Returns height (int) or None.
+    Accepts values like: "best", "720p", "1080", "480p".
+    Returns height (int) or None (for best).
     """
     q = quality.strip().lower().replace("p", "")
     if q == "best":
@@ -31,6 +33,12 @@ def _parse_quality_to_height(quality: str) -> Optional[int]:
 
 
 class YouTubeProcessor:
+    def __init__(self) -> None:
+        # Packaging (zip + output selection) is delegated to a focused helper.
+        self._packager = OutputPackager()
+        self._packager = OutputPackager()
+        self._reporter = ReportWriter()
+
     def process(
         self,
         job_id: str,
@@ -38,35 +46,57 @@ class YouTubeProcessor:
         mode: str,
         quality: str,
         cookies_path: str | None = None,
-        progress_cb: Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None = None
+        progress_cb: Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None = None,
     ) -> ProcessResult:
         out_dir = Path(settings.outputs_dir) / job_id
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        # Detect playlist vs single (so we can decide zip vs single fixed output name)
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
-            info = ydl.extract_info(url, download=False)
+        # 1) Safe detect: avoid processing playlist entries during probing
+        probe_opts = {"quiet": True, "no_warnings": True}
+        if cookies_path:
+            probe_opts["cookiefile"] = cookies_path
 
-        is_playlist = bool(
-            info and (info.get("_type") == "playlist" or info.get("entries"))
-        )
-        split_title = self._should_split_title(info or {}, url, is_playlist)
+        with yt_dlp.YoutubeDL(probe_opts) as ydl:
+            info = ydl.extract_info(url, download=False, process=False)
+
+        is_playlist = bool(info and (info.get("_type") == "playlist" or info.get("entries")))
         height = _parse_quality_to_height(quality)
+
+        # 2) Playlist path: process item-by-item and return ZIP (do NOT call _download_audio/_download_video)
+        if is_playlist:
+            zip_path = self._process_playlist(
+                job_id=job_id,
+                playlist_url=url,
+                mode=mode,
+                quality=quality,
+                height=height,
+                out_dir=out_dir,
+                cookies_path=cookies_path,
+                progress_cb=progress_cb,
+            )
+            return ProcessResult(output_path=zip_path, output_type="zip", is_playlist=True)
+
+        # Single item path: now we can extract full info (safe to decide split_title)
+        with yt_dlp.YoutubeDL(probe_opts) as ydl:
+            full_info = ydl.extract_info(url, download=False)
+
+        split_title = self._should_split_title(full_info or {}, url, is_playlist=False)
 
         if mode == "audio":
             return self._download_audio(
                 url=url,
                 out_dir=out_dir,
-                is_playlist=is_playlist,
+                is_playlist=False,
                 split_title=split_title,
                 cookies_path=cookies_path,
                 progress_cb=progress_cb,
             )
+
         if mode == "video":
             return self._download_video(
                 url=url,
                 out_dir=out_dir,
-                is_playlist=is_playlist,
+                is_playlist=False,
                 height=height,
                 split_title=split_title,
                 cookies_path=cookies_path,
@@ -75,8 +105,15 @@ class YouTubeProcessor:
 
         raise ValueError(f"Unsupported mode: {mode}")
 
+
     def _common_opts(
-        self, outtmpl: str, noplaylist: bool, cookies_path: str | None, progress_hook=None) -> dict:
+        self,
+        outtmpl: str,
+        noplaylist: bool,
+        cookies_path: str | None,
+        progress_hook=None,
+    ) -> dict:
+        # On Windows, we keep a repo-local FFmpeg binary path for predictability.
         ffmpeg_bin = Path.cwd() / "bin" / "ffmpeg.exe"
 
         opts = {
@@ -91,9 +128,11 @@ class YouTubeProcessor:
         }
 
         if cookies_path:
+            # Optional: authenticated access (age-gated/private/unlisted where applicable).
             opts["cookiefile"] = cookies_path
 
         if settings.embed_thumbnail:
+            # Download thumbnail and convert to a stable format for embedding.
             opts["writethumbnail"] = True
             opts["convertthumbnails"] = settings.thumbnail_convert_format
 
@@ -102,6 +141,23 @@ class YouTubeProcessor:
 
         return opts
 
+    def _extract_playlist_entries(self, url: str, cookies_path: str | None) -> tuple[str, list[dict]]:
+        probe_opts = {"quiet": True, "no_warnings": True}
+        if cookies_path:
+            probe_opts["cookiefile"] = cookies_path
+
+        with yt_dlp.YoutubeDL(probe_opts) as ydl:
+            info = ydl.extract_info(url, download=False, process=False)
+
+        title = (info.get("title") or "playlist")
+        entries = [e for e in (info.get("entries") or []) if e]
+        return title, entries
+
+    def _make_prefix(self, idx: int, total: int) -> str:
+        width = max(2, len(str(total)))
+        return f"{idx:0{width}d}-"
+
+
     def _download_audio(
         self,
         url: str,
@@ -109,20 +165,18 @@ class YouTubeProcessor:
         is_playlist: bool,
         split_title: bool,
         cookies_path: str | None,
-        progress_cb: Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None = None
+        progress_cb: Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None = None,
     ) -> ProcessResult:
-        if is_playlist:
-            outtmpl = str(out_dir / "%(title).200s.%(ext)s")
-            noplaylist = False
-        else:
-            outtmpl = str(out_dir / "%(title).200s.%(ext)s")
-            noplaylist = True
+        # We keep the output template identical for single vs playlist;
+        # yt-dlp decides naming per-item.
+        outtmpl = str(out_dir / "%(title).200s.%(ext)s")
+        noplaylist = not is_playlist
 
         hook = self._build_progress_hook(progress_cb, is_playlist=is_playlist)
         opts = self._common_opts(outtmpl=outtmpl, noplaylist=noplaylist, cookies_path=cookies_path, progress_hook=hook)
         opts["parse_metadata"] = self._parse_metadata_rules(split_title)
 
-        # Best audio + convert to mp3 via FFmpeg
+        # Best audio + convert to mp3 via FFmpeg.
         opts.update(
             {
                 "format": "bestaudio/best",
@@ -132,7 +186,7 @@ class YouTubeProcessor:
                         "preferredcodec": "mp3",
                         "preferredquality": "0",
                     },
-                    # IMPORTANT: metadata first, then embed thumbnail :contentReference[oaicite:9]{index=9}
+                    # IMPORTANT: metadata first, then embed thumbnail (when enabled).
                     *self._metadata_postprocessors(),
                 ],
             }
@@ -148,18 +202,22 @@ class YouTubeProcessor:
             progress_cb(95, "postprocessing", None, None)
 
         if is_playlist:
+            # Delegate zipping to the packager module.
             zip_path = out_dir / "result.zip"
-            self._zip_outputs(out_dir=out_dir, zip_path=zip_path, allowed_ext={".mp3"})
-        
+            sel = self._packager.zip_outputs(out_dir=out_dir, zip_path=zip_path, allowed_ext={".mp3"})
+
             if progress_cb:
                 progress_cb(100, "done", 0, 0)
 
-            return ProcessResult(output_path=zip_path, output_type="zip", is_playlist=True)
+            return ProcessResult(output_path=sel.path, output_type=sel.output_type, is_playlist=True)
 
-        fallback = self._pick_first(out_dir, exts={".mp3"})
+        # Single-file output: pick the first produced MP3.
+        sel = self._packager.pick_first(out_dir, exts={".mp3"})
+
         if progress_cb:
             progress_cb(100, "done", 0, 0)
-        return ProcessResult(output_path=fallback, output_type="mp3", is_playlist=False)
+
+        return ProcessResult(output_path=sel.path, output_type="mp3", is_playlist=False)
 
     def _download_video(
         self,
@@ -169,16 +227,12 @@ class YouTubeProcessor:
         height: Optional[int],
         split_title: bool,
         cookies_path: str | None,
-        progress_cb: Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None = None
+        progress_cb: Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None = None,
     ) -> ProcessResult:
-        if is_playlist:
-            outtmpl = str(out_dir / "%(title).200s.%(ext)s")
-            noplaylist = False
-        else:
-            outtmpl = str(out_dir / "%(title).200s.%(ext)s")
-            noplaylist = True
+        outtmpl = str(out_dir / "%(title).200s.%(ext)s")
+        noplaylist = not is_playlist
 
-        # yt-dlp format selection examples: bv*+ba/b is canonical :contentReference[oaicite:3]{index=3}
+        # yt-dlp canonical selection: bv*+ba/b; we constrain height if requested.
         if height:
             fmt = f"bv*[height<={height}]+ba/b[height<={height}]"
         else:
@@ -186,7 +240,6 @@ class YouTubeProcessor:
 
         hook = self._build_progress_hook(progress_cb, is_playlist=is_playlist)
         opts = self._common_opts(outtmpl=outtmpl, noplaylist=noplaylist, cookies_path=cookies_path, progress_hook=hook)
-
         opts["parse_metadata"] = self._parse_metadata_rules(split_title)
 
         opts.update(
@@ -209,8 +262,9 @@ class YouTubeProcessor:
             progress_cb(95, "postprocessing", None, None)
 
         if is_playlist:
+            # Delegate zipping to the packager module.
             zip_path = out_dir / "result.zip"
-            self._zip_outputs(
+            sel = self._packager.zip_outputs(
                 out_dir=out_dir,
                 zip_path=zip_path,
                 allowed_ext={".mp4", ".mkv", ".webm"},
@@ -219,99 +273,56 @@ class YouTubeProcessor:
             if progress_cb:
                 progress_cb(100, "done", 0, 0)
 
-            return ProcessResult(output_path=zip_path, output_type="zip", is_playlist=True)
+            return ProcessResult(output_path=sel.path, output_type=sel.output_type, is_playlist=True)
 
-        fallback = self._pick_first(out_dir, exts={".mp4", ".mkv", ".webm"})
+        # Single-file output: pick the first produced video file.
+        sel = self._packager.pick_first(out_dir, exts={".mp4", ".mkv", ".webm"})
+
         if progress_cb:
             progress_cb(100, "done", 0, 0)
 
-        return ProcessResult(
-            output_path=fallback,
-            output_type=fallback.suffix.lower().lstrip("."),
-            is_playlist=False,
-        )
-
-    def _zip_outputs(
-        self, out_dir: Path, zip_path: Path, allowed_ext: set[str]
-    ) -> None:
-        if zip_path.exists():
-            zip_path.unlink()
-
-        # Remove temporary thumbnail files (jpg, webp, etc.) before zipping
-        temp_exts = {".jpg", ".jpeg", ".png", ".webp"}
-        for p in out_dir.iterdir():
-            if p.is_file() and p.suffix.lower() in temp_exts:
-                if p.suffix.lower() not in allowed_ext:
-                    p.unlink()
-
-        files = [
-            p
-            for p in out_dir.iterdir()
-            if p.is_file()
-            and p.suffix.lower() in allowed_ext
-            and p.name != zip_path.name
-        ]
-
-        if not files:
-            raise RuntimeError("No output files to zip")
-
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for p in files:
-                zf.write(p, arcname=p.name)
-
-    def _pick_first(self, out_dir: Path, exts: set[str]) -> Path:
-        for p in out_dir.iterdir():
-            if p.is_file() and p.suffix.lower() in exts:
-                return p
-        raise RuntimeError("No output file produced")
+        return ProcessResult(output_path=sel.path, output_type=sel.output_type, is_playlist=False)
 
     def _metadata_postprocessors(self) -> list[dict]:
         pps: list[dict] = []
 
         if settings.embed_metadata:
-            # Adds/embeds metadata into the final media container :contentReference[oaicite:6]{index=6}
+            # Adds/embeds metadata into the final media container.
             pps.append({"key": "FFmpegMetadata", "add_metadata": True})
 
         if settings.embed_thumbnail:
-            # Embed thumbnail as cover art :contentReference[oaicite:7]{index=7}
+            # Embed thumbnail as cover art.
             pps.append({"key": "EmbedThumbnail"})
 
         return pps
 
     def _should_split_title(self, info: dict, url: str, is_playlist: bool) -> bool:
-        # Conservative: don't split titles inside playlists (avoid breaking mixed content)
+        # Conservative: never split titles inside playlists (avoid mixed-content issues).
         if is_playlist:
             return False
 
-        # If extractor already provided structured music metadata, do NOT override it
-        if (
-            info.get("artist")
-            or info.get("album")
-            or info.get("track")
-            or info.get("album_artist")
-        ):
+        # If extractor already provided structured music metadata, do not override it.
+        if info.get("artist") or info.get("album") or info.get("track") or info.get("album_artist"):
             return False
-        if info.get("artists"):  # sometimes list of artists exists
+        if info.get("artists"):
             return False
 
-        # YouTube Music URLs are more likely to have real artist/track data
+        # YouTube Music URLs are more likely to have reliable artist/track metadata.
         if "music.youtube.com" in url.lower():
             return False
 
         title = (info.get("title") or "").strip()
-        # Only split when it really looks like "Artist - Title"
+        # Only split when it really looks like "Artist - Title".
         return " - " in title and len(title) >= 5
 
     def _parse_metadata_rules(self, split_title: bool) -> list[str]:
         rules: list[str] = []
 
-        # Only apply this if we decided it's safe. This avoids overriding existing artist.
+        # Apply only when we decided it's safe; avoids overriding real metadata.
         if split_title:
-            rules.append(
-                "title:%(artist)s - %(title)s"
-            )  # official example :contentReference[oaicite:1]{index=1}
+            rules.append("title:%(artist)s - %(title)s")
 
-        # Playlist mapping (safe even for single; fields just won't exist)
+        # Playlist mapping (safe even for single; fields just won't exist).
         rules += [
             "playlist_title:%(album)s",
             "playlist_index:%(track_number)s",
@@ -331,6 +342,7 @@ class YouTubeProcessor:
                 speed_bps = 0
             else:
                 stage = "downloading"
+
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             downloaded = d.get("downloaded_bytes")
 
@@ -358,5 +370,230 @@ class YouTubeProcessor:
                     percent = item_pct
 
             progress_cb(percent, stage, eta_seconds, speed_bps)
+
+        return hook
+    
+
+    def _build_item_progress_hook(self, progress_cb, idx: int, total: int):
+        def hook(d: dict):
+            if not progress_cb:
+                return
+
+            status = d.get("status")
+            eta = d.get("eta")
+            speed = d.get("speed")
+
+            eta_seconds = int(eta) if isinstance(eta, (int, float)) else None
+            speed_bps = int(speed) if isinstance(speed, (int, float)) else None
+
+            total_bytes = d.get("total_bytes") or d.get("total_bytes_estimate")
+            downloaded = d.get("downloaded_bytes")
+
+            pct = None
+            if isinstance(total_bytes, (int, float)) and isinstance(downloaded, (int, float)) and total_bytes > 0:
+                item_pct = min(99, int((downloaded / total_bytes) * 100))
+                overall = ((idx - 1) + (item_pct / 100.0)) / max(1, total) * 100.0
+                pct = min(99, int(overall))
+
+            stage = "downloading"
+            if status == "downloading":
+                stage = f"downloading item {idx}/{total}"
+            elif status == "finished":
+                stage = f"finalizing item {idx}/{total}"
+
+            progress_cb(pct, stage, eta_seconds, speed_bps)
+
         return hook
 
+    def _download_one_audio(
+        self,
+        item_url: str,
+        out_dir: Path,
+        prefix: str,
+        quality: str,
+        cookies_path: str | None,
+        progress_cb=None,
+        idx: int = 1,
+        total: int = 1,
+    ):
+        outtmpl = str(out_dir / f"{prefix}%(title).200s.%(ext)s")
+        hook = self._build_item_progress_hook(progress_cb, idx, total)
+        opts = self._common_opts(outtmpl=outtmpl, noplaylist=True, cookies_path=cookies_path, progress_hook=hook)
+
+        opts["parse_metadata"] = self._parse_metadata_rules(split_title=False)  # keep conservative in playlists
+        opts.update(
+            {
+                "format": "bestaudio/best",
+                "postprocessors": [
+                    {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "0"},
+                    *self._metadata_postprocessors(),
+                ],
+            }
+        )
+
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.download([item_url])
+
+        # pick the produced mp3 for this prefix
+        candidates = sorted(out_dir.glob(f"{prefix}*.mp3"))
+        if candidates:
+            return candidates[0]
+
+        # fallback (rare)
+        return self._packager.pick_first(out_dir, exts={".mp3"}).path
+
+
+    def _download_one_video(
+        self,
+        item_url: str,
+        out_dir: Path,
+        prefix: str,
+        height: Optional[int],
+        cookies_path: str | None,
+        progress_cb=None,
+        idx: int = 1,
+        total: int = 1,
+    ):
+        outtmpl = str(out_dir / f"{prefix}%(title).200s.%(ext)s")
+        hook = self._build_item_progress_hook(progress_cb, idx, total)
+        opts = self._common_opts(outtmpl=outtmpl, noplaylist=True, cookies_path=cookies_path, progress_hook=hook)
+
+        if height:
+            fmt = f"bv*[height<={height}]+ba/b[height<={height}]"
+        else:
+            fmt = "bv*+ba/b"
+
+        opts["parse_metadata"] = self._parse_metadata_rules(split_title=False)
+        opts.update(
+            {
+                "format": fmt,
+                "merge_output_format": "mp4",
+                "postprocessors": [*self._metadata_postprocessors()],
+            }
+        )
+
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.download([item_url])
+
+        # prefer mp4
+        mp4 = sorted(out_dir.glob(f"{prefix}*.mp4"))
+        if mp4:
+            return mp4[0]
+
+        # fallback containers
+        for ext in ("mkv", "webm"):
+            c = sorted(out_dir.glob(f"{prefix}*.{ext}"))
+            if c:
+                return c[0]
+
+        return self._packager.pick_first(out_dir, exts={".mp4", ".mkv", ".webm"}).path
+
+    def _process_playlist(
+        self,
+        job_id: str,
+        playlist_url: str,
+        mode: str,
+        quality: str,
+        height: Optional[int],
+        out_dir: Path,
+        cookies_path: str | None,
+        progress_cb=None,
+    ):
+        playlist_title, entries = self._extract_playlist_entries(playlist_url, cookies_path)
+        total = len(entries)
+
+        success_files: list[Path] = []
+        failures: list[PlaylistFailure] = []
+
+        if progress_cb:
+            progress_cb(0, "extracting playlist", None, None)
+
+        for i, e in enumerate(entries, start=1):
+            prefix = self._make_prefix(i, total)
+            video_id = e.get("id") or e.get("url")
+            title = e.get("title")
+            item_url = e.get("webpage_url") or (f"https://www.youtube.com/watch?v={video_id}" if video_id else None)
+
+            if not item_url:
+                failures.append(
+                    PlaylistFailure(
+                        index=i,
+                        title=title,
+                        video_id=video_id,
+                        url=None,
+                        reason_code="UNAVAILABLE",
+                        error_message="Missing item URL in playlist entries",
+                    )
+                )
+                continue
+
+            try:
+                if progress_cb:
+                    base_pct = int(((i - 1) / max(1, total)) * 100)
+                    progress_cb(base_pct, f"starting item {i}/{total}", None, None)
+
+                if mode == "audio":
+                    p = self._download_one_audio(
+                        item_url=item_url,
+                        out_dir=out_dir,
+                        prefix=prefix,
+                        quality=quality,
+                        cookies_path=cookies_path,
+                        progress_cb=progress_cb,
+                        idx=i,
+                        total=total,
+                    )
+                    success_files.append(p)
+                else:
+                    p = self._download_one_video(
+                        item_url=item_url,
+                        out_dir=out_dir,
+                        prefix=prefix,
+                        height=height,
+                        cookies_path=cookies_path,
+                        progress_cb=progress_cb,
+                        idx=i,
+                        total=total,
+                    )
+                    success_files.append(p)
+
+            except Exception as ex:
+                failures.append(
+                    PlaylistFailure(
+                        index=i,
+                        title=title,
+                        video_id=video_id,
+                        url=item_url,
+                        reason_code=classify_error(ex),
+                        error_message=str(ex),
+                    )
+                )
+                # continue to next item
+                continue
+
+        # Write report.json always
+        report = PlaylistReport(
+            job_id=job_id,
+            source_url=playlist_url,
+            mode=mode,
+            quality=quality,
+            total_items=total,
+            succeeded=len(success_files),
+            failed=len(failures),
+            success_files=[p.name for p in success_files],
+            failures=failures,
+        )
+        report_path = self._reporter.write_playlist_report(out_dir, report)
+
+        if progress_cb:
+            progress_cb(95, "packaging", None, None)
+
+        # Success criteria: at least 1 success
+        if success_files:
+            zip_path = out_dir / "result.zip"
+            # include report.json in the zip for the user
+            self._packager.zip_files(zip_path, success_files + [report_path])
+            return zip_path
+
+        # All failed
+        raise AllPlaylistItemsFailed("All playlist items failed. See report.json for details.")

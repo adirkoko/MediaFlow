@@ -186,3 +186,19 @@ async def job_events(job_id: str, username: str = Depends(get_current_username))
             await asyncio.sleep(1)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+@router.get("/{job_id}/report")
+def download_report(job_id: str, username: str = Depends(get_current_username)):
+    store = JobsStore()
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user != username:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    out_dir = Path(settings.outputs_dir) / job_id
+    report_path = out_dir / "report.json"
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    return FileResponse(path=str(report_path), filename="report.json")
