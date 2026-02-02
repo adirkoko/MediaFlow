@@ -12,11 +12,15 @@ This repository is intentionally **not** an enterprise platform. It is a lightwe
 - **Jobs API** for single videos or playlists:
   - Audio or video output
   - Quality selection (e.g., `best`, `720p`, `1080p`)
+  - Live progress includes ETA and speed (eta_seconds, speed_bps)
 - **MP3 output** for audio (via FFmpeg).
 - **Metadata embedding** (tags + cover art) for audio/video (where supported by container/player).
 - **Playlist support**:
-  - Processes items sequentially
-  - Returns a `.zip` archive for convenience
+  - Processes item-by-item (continues even if some items fail)
+  - Produces `result.zip` with all successfully downloaded items
+  - Generates `report.json` with per-item failures and reasons
+  - Playlist summary fields: `playlist_total`, `playlist_succeeded`, `playlist_failed` (available via job status APIs)
+  - Job is succeeded if at least one item succeeds, otherwise failed with a clear error
 - **Load control**:
   - Global concurrency limit
   - Per-user active jobs quota
@@ -66,7 +70,11 @@ backend/
       backoff.py
       cleanup.py
       cookies.py
+      error_codes.py
+      job_logging.py
       job_manager.py
+      packaging.py
+      reporting.py
       worker.py
       youtube_processor.py
     models/
@@ -196,10 +204,10 @@ Common settings:
 | `DEDUP_WINDOW_MINUTES` | `60` | Dedup window for identical requests |
 | `OUTPUTS_TTL_HOURS` | `24` | Output folder time-to-live |
 | `OUTPUTS_CLEANUP_INTERVAL_MINUTES` | `60` | Cleanup scheduler interval |
-| `EMBED_METADATA` | `true` | Embed tags into output |
+| `EMBED_METADATA` | `true` | Embed tags (artist, title, album) into output |
 | `EMBED_THUMBNAIL` | `true` | Embed thumbnail as cover art |
 | `THUMBNAIL_CONVERT_FORMAT` | `jpg` | Convert thumbnails to this format |
-| `MAX_ATTEMPTS` | `4` | Backoff attempts for transient errors |
+| `MAX_ATTEMPTS` | `4` | Retries for transient errors (backoff) |
 | `BACKOFF_BASE_SECONDS` | `2.0` | Backoff base delay |
 | `COOKIES_FILE` | *(empty)* | Optional absolute path to cookies.txt (see below) |
 
@@ -237,6 +245,7 @@ Bearer <access_token>
 - `GET /jobs` — list last jobs for current user (default 50)
 - `GET /jobs/{job_id}` — get job status + metadata + progress
 - `GET /jobs/{job_id}/download` — download output file (mp3/mp4/zip)
+- `GET /jobs/{job_id}/report` — download the detailed `report.json` for playlists.
 - `GET /jobs/{job_id}/events` — **SSE** live progress stream
 
 ### Usage
@@ -254,10 +263,32 @@ curl -X POST "http://127.0.0.1:8000/jobs" \
   -d "{\"url\":\"https://www.youtube.com/watch?v=dQw4w9WgXcQ\",\"mode\":\"audio\",\"quality\":\"best\"}"
 ```
 
+Response:
+```json
+{
+  "job_id": "3136209e-...",
+  "status": "queued",
+  "reused": false
+}
+```
+
 2) Poll status:
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
   "http://127.0.0.1:8000/jobs/<job_id>"
+```
+
+Response (for playlists):
+```json
+{
+  "job_id": "3136209e-...",
+  "status": "succeeded",
+  "playlist_total": 12,
+  "playlist_succeeded": 11,
+  "playlist_failed": 1,
+  "output_filename": "result.zip",
+  "output_type": "zip"
+}
 ```
 
 3) Download when `status == "succeeded"`:
@@ -297,8 +328,9 @@ Event payload example:
 ```
 
 Notes:
-- Progress is a **best-effort** approximation (especially for playlists).
-- `eta_seconds` and `speed_bps` are reported when available from the downloader; during post-processing they may be `null`/`0`.
+- Progress is a **best-effort** approximation. For playlists, the `stage` field indicates item position (e.g., `downloading item 3/25`).
+- Summary fields (`playlist_total`, etc.) are available via the Job status API once processing is complete.
+- `eta_seconds` and `speed_bps` are reported when available; during post-processing they may be `null`/`0`.
 
 ---
 
@@ -308,7 +340,8 @@ When enabled (`EMBED_METADATA=true`, `EMBED_THUMBNAIL=true`):
 - Audio output (MP3) will include tags and embedded cover image (where supported by your media player).
 - Video output may include metadata and embedded thumbnail depending on container and player.
 
-For naming, output filenames are based on the YouTube title with Windows-safe sanitization.
+- **Filenames**: Output filenames are based on the YouTube title with Windows-safe sanitization.
+- **Title Parsing**: For some content, the system attempts to intelligently split "Artist - Title" to improve metadata accuracy.
 
 ---
 
@@ -352,9 +385,9 @@ COOKIES_FILE=C:\path\to\cookies.txt
 
 Security notes:
 - **Do not commit cookies**.
-- Treat cookies as sensitive credentials.
-- Prefer storing them outside the repository.
-- The backend copies cookies to a per-job temporary file and deletes it after processing.
+- Cookies are treated as **sensitive credentials**; never share them and do not store them in the repository.
+- Prefer storing them in a secure path outside the project directory.
+- The backend copies cookies to a per-job temporary file and ensures its deletion immediately after processing.
 
 ---
 
@@ -374,6 +407,14 @@ Security notes:
 - Check `output_filename`/`output_type` in `GET /jobs/{job_id}`.
 - Confirm the outputs directory exists and TTL cleanup hasn't removed it.
 
+### Job failed with ALL_ITEMS_FAILED
+- This means every item in the playlist encountered an error.
+- Download the detailed report via `GET /jobs/{job_id}/report` to see per-item failure reasons.
+
+### Playlist partially succeeded
+- The `result.zip` contains only the successful items.
+- Check `report.json` (inside the ZIP or via the `/report` endpoint) to see which items failed and why.
+
 ---
 
 ## Development Notes
@@ -385,11 +426,10 @@ Security notes:
 ---
 
 ## Roadmap (Optional Ideas)
-
 - `GET /jobs/{job_id}/log` endpoint (serve job.log safely)
-- Admin endpoints for manual user management
-- Optional frontend UI
-- Better playlist progress estimation
+- Admin user management endpoints (create/delete users via API)
+- Optional frontend UI (Web Dashboard)
+- Expose granular per-item statuses in the jobs API
 - Optional storage backends (S3/local network path)
 
 ---

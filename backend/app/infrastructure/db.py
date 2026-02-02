@@ -37,6 +37,9 @@ def ensure_db_initialized() -> None:
         _try_add_column(conn, "jobs", "updated_at TEXT")
         _try_add_column(conn, "jobs", "eta_seconds INTEGER")
         _try_add_column(conn, "jobs", "speed_bps INTEGER")
+        _try_add_column(conn, "jobs", "playlist_total INTEGER")
+        _try_add_column(conn, "jobs", "playlist_succeeded INTEGER")
+        _try_add_column(conn, "jobs", "playlist_failed INTEGER")
 
 
         try:

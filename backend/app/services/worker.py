@@ -13,6 +13,7 @@ from app.services.error_codes import classify_error
 from app.services.job_logging import JobLogger
 from app.services.job_manager import JobManager
 from app.services.youtube_processor import YouTubeProcessor
+from app.core.exceptions import AllPlaylistItemsFailed
 
 log = logging.getLogger("worker")
 
@@ -77,7 +78,9 @@ class Worker:
                 speed_bps=None,
             )
 
-            job_log.log(f"START {job_id} user={job.user} mode={job.mode} quality={job.quality}")
+            job_log.log(
+                f"START {job_id} user={job.user} mode={job.mode} quality={job.quality}"
+            )
             job_log.log(f"url={job.url}")
 
             t0 = time.perf_counter()
@@ -100,7 +103,9 @@ class Worker:
                         mode=job.mode,
                         quality=job.quality,
                         # Pass the per-job cookie file path to the processor.
-                        cookies_path=(str(cookies_handle.path) if cookies_handle else None),
+                        cookies_path=(
+                            str(cookies_handle.path) if cookies_handle else None
+                        ),
                         progress_cb=progress_cb,
                     )
 
@@ -110,7 +115,14 @@ class Worker:
                 duration_ms = int((time.perf_counter() - t0) * 1000)
                 job_log.log(f"OUTPUT={result.output_path.name}")
 
-                self._store.update_progress(job_id, 100, "done", updated_at=_utc_now(), eta_seconds=0, speed_bps=0)
+                self._store.update_progress(
+                    job_id,
+                    100,
+                    "done",
+                    updated_at=_utc_now(),
+                    eta_seconds=0,
+                    speed_bps=0,
+                )
 
                 # Mark the job as succeeded and store output metadata.
                 self._store.update_status(
@@ -120,6 +132,9 @@ class Worker:
                     output_filename=result.output_path.name,
                     output_type=result.output_type,
                     error_code=None,
+                    playlist_total=result.playlist_total,
+                    playlist_succeeded=result.playlist_succeeded,
+                    playlist_failed=result.playlist_failed,
                 )
 
                 # Usage metrics (operational visibility).
@@ -143,6 +158,12 @@ class Worker:
                 error_code = classify_error(e)
                 is_playlist = "list=" in (job.url or "").lower()
 
+                p_total, p_succeeded, p_failed = None, None, None
+                if isinstance(e, AllPlaylistItemsFailed):
+                    p_total = e.total
+                    p_succeeded = 0
+                    p_failed = e.failed
+
                 self._store.update_progress(
                     job_id,
                     None,
@@ -157,6 +178,9 @@ class Worker:
                     finished_at=_utc_now(),
                     error_message=str(e),
                     error_code=error_code,
+                    playlist_total=p_total,
+                    playlist_succeeded=p_succeeded,
+                    playlist_failed=p_failed,
                 )
 
                 self._usage.add_event(

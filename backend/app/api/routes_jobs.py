@@ -1,3 +1,4 @@
+# backend/app/api/routes_jobs.py
 import asyncio
 import json
 from fastapi import APIRouter, Depends, HTTPException
@@ -72,6 +73,9 @@ def get_job(job_id: str, username: str = Depends(get_current_username)) -> JobRe
         updated_at=job.updated_at,
         eta_seconds=job.eta_seconds,
         speed_bps=job.speed_bps,
+        playlist_total=job.playlist_total,
+        playlist_succeeded=job.playlist_succeeded,
+        playlist_failed=job.playlist_failed,
     )
 
 
@@ -114,8 +118,11 @@ def download(job_id: str, username: str = Depends(get_current_username)):
 
     raise HTTPException(status_code=500, detail="No downloadable output found")
 
+
 @router.get("", response_model=list[JobResponse])
-def list_jobs(username: str = Depends(get_current_username), limit: int = 50) -> list[JobResponse]:
+def list_jobs(
+    username: str = Depends(get_current_username), limit: int = 50
+) -> list[JobResponse]:
     store = JobsStore()
     jobs = store.list_jobs_for_user(user=username, limit=limit)
     return [
@@ -138,7 +145,9 @@ def list_jobs(username: str = Depends(get_current_username), limit: int = 50) ->
             updated_at=j.updated_at,
             eta_seconds=j.eta_seconds,
             speed_bps=j.speed_bps,
-
+            playlist_total=j.playlist_total,
+            playlist_succeeded=j.playlist_succeeded,
+            playlist_failed=j.playlist_failed,
         )
         for j in jobs
     ]
@@ -186,6 +195,7 @@ async def job_events(job_id: str, username: str = Depends(get_current_username))
             await asyncio.sleep(1)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
 
 @router.get("/{job_id}/report")
 def download_report(job_id: str, username: str = Depends(get_current_username)):

@@ -26,6 +26,9 @@ class JobRecord:
     updated_at: Optional[str]
     eta_seconds: Optional[int]
     speed_bps: Optional[int]
+    playlist_total: Optional[int]
+    playlist_succeeded: Optional[int]
+    playlist_failed: Optional[int]
 
 
 
@@ -71,6 +74,10 @@ class JobsStore:
         output_type: Optional[str] = None,
         error_code: Optional[str] = None,
         request_fingerprint: Optional[str] = None,
+        playlist_total: Optional[int] = None,
+        playlist_succeeded: Optional[int] = None,
+        playlist_failed: Optional[int] = None,
+
     ) -> None:
         with get_conn() as conn:
             conn.execute(
@@ -83,7 +90,10 @@ class JobsStore:
                     output_filename = COALESCE(?, output_filename),
                     output_type = COALESCE(?, output_type),
                     error_code = COALESCE(?, error_code),
-                    request_fingerprint = COALESCE(?, request_fingerprint)
+                    request_fingerprint = COALESCE(?, request_fingerprint),
+                    playlist_total = COALESCE(?, playlist_total),
+                    playlist_succeeded = COALESCE(?, playlist_succeeded),
+                    playlist_failed = COALESCE(?, playlist_failed)
                 WHERE job_id = ?
                 """,
                 (
@@ -95,6 +105,9 @@ class JobsStore:
                     output_type,
                     error_code,
                     request_fingerprint,
+                    playlist_total,
+                    playlist_succeeded,
+                    playlist_failed,
                     job_id,
                 ),
             )

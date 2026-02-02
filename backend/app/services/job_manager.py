@@ -1,3 +1,4 @@
+# backend/app/services/job_manager.py
 import asyncio
 import uuid
 import hashlib

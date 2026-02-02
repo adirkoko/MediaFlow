@@ -1,3 +1,4 @@
+# backend/app/models/schemas.py
 from enum import Enum
 from pydantic import BaseModel, Field
 
@@ -59,6 +60,10 @@ class JobResponse(BaseModel):
     updated_at: str | None = None
     eta_seconds: int | None = None
     speed_bps: int | None = None
+    playlist_total: int | None = None
+    playlist_succeeded: int | None = None
+    playlist_failed: int | None = None
+
 
 
 

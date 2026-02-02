@@ -17,6 +17,9 @@ class ProcessResult:
     output_path: Path
     output_type: str  # "mp3" / "mp4" / "zip" / "mkv" / "webm"
     is_playlist: bool
+    playlist_total: Optional[int] = None
+    playlist_succeeded: Optional[int] = None
+    playlist_failed: Optional[int] = None
 
 
 def _parse_quality_to_height(quality: str) -> Optional[int]:
@@ -46,7 +49,9 @@ class YouTubeProcessor:
         mode: str,
         quality: str,
         cookies_path: str | None = None,
-        progress_cb: Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None = None,
+        progress_cb: (
+            Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None
+        ) = None,
     ) -> ProcessResult:
         out_dir = Path(settings.outputs_dir) / job_id
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -59,12 +64,14 @@ class YouTubeProcessor:
         with yt_dlp.YoutubeDL(probe_opts) as ydl:
             info = ydl.extract_info(url, download=False, process=False)
 
-        is_playlist = bool(info and (info.get("_type") == "playlist" or info.get("entries")))
+        is_playlist = bool(
+            info and (info.get("_type") == "playlist" or info.get("entries"))
+        )
         height = _parse_quality_to_height(quality)
 
         # 2) Playlist path: process item-by-item and return ZIP (do NOT call _download_audio/_download_video)
         if is_playlist:
-            zip_path = self._process_playlist(
+            return self._process_playlist(
                 job_id=job_id,
                 playlist_url=url,
                 mode=mode,
@@ -74,7 +81,6 @@ class YouTubeProcessor:
                 cookies_path=cookies_path,
                 progress_cb=progress_cb,
             )
-            return ProcessResult(output_path=zip_path, output_type="zip", is_playlist=True)
 
         # Single item path: now we can extract full info (safe to decide split_title)
         with yt_dlp.YoutubeDL(probe_opts) as ydl:
@@ -104,7 +110,6 @@ class YouTubeProcessor:
             )
 
         raise ValueError(f"Unsupported mode: {mode}")
-
 
     def _common_opts(
         self,
@@ -141,7 +146,9 @@ class YouTubeProcessor:
 
         return opts
 
-    def _extract_playlist_entries(self, url: str, cookies_path: str | None) -> tuple[str, list[dict]]:
+    def _extract_playlist_entries(
+        self, url: str, cookies_path: str | None
+    ) -> tuple[str, list[dict]]:
         probe_opts = {"quiet": True, "no_warnings": True}
         if cookies_path:
             probe_opts["cookiefile"] = cookies_path
@@ -149,14 +156,13 @@ class YouTubeProcessor:
         with yt_dlp.YoutubeDL(probe_opts) as ydl:
             info = ydl.extract_info(url, download=False, process=False)
 
-        title = (info.get("title") or "playlist")
+        title = info.get("title") or "playlist"
         entries = [e for e in (info.get("entries") or []) if e]
         return title, entries
 
     def _make_prefix(self, idx: int, total: int) -> str:
         width = max(2, len(str(total)))
         return f"{idx:0{width}d}-"
-
 
     def _download_audio(
         self,
@@ -165,7 +171,9 @@ class YouTubeProcessor:
         is_playlist: bool,
         split_title: bool,
         cookies_path: str | None,
-        progress_cb: Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None = None,
+        progress_cb: (
+            Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None
+        ) = None,
     ) -> ProcessResult:
         # We keep the output template identical for single vs playlist;
         # yt-dlp decides naming per-item.
@@ -173,7 +181,12 @@ class YouTubeProcessor:
         noplaylist = not is_playlist
 
         hook = self._build_progress_hook(progress_cb, is_playlist=is_playlist)
-        opts = self._common_opts(outtmpl=outtmpl, noplaylist=noplaylist, cookies_path=cookies_path, progress_hook=hook)
+        opts = self._common_opts(
+            outtmpl=outtmpl,
+            noplaylist=noplaylist,
+            cookies_path=cookies_path,
+            progress_hook=hook,
+        )
         opts["parse_metadata"] = self._parse_metadata_rules(split_title)
 
         # Best audio + convert to mp3 via FFmpeg.
@@ -204,12 +217,16 @@ class YouTubeProcessor:
         if is_playlist:
             # Delegate zipping to the packager module.
             zip_path = out_dir / "result.zip"
-            sel = self._packager.zip_outputs(out_dir=out_dir, zip_path=zip_path, allowed_ext={".mp3"})
+            sel = self._packager.zip_outputs(
+                out_dir=out_dir, zip_path=zip_path, allowed_ext={".mp3"}
+            )
 
             if progress_cb:
                 progress_cb(100, "done", 0, 0)
 
-            return ProcessResult(output_path=sel.path, output_type=sel.output_type, is_playlist=True)
+            return ProcessResult(
+                output_path=sel.path, output_type=sel.output_type, is_playlist=True
+            )
 
         # Single-file output: pick the first produced MP3.
         sel = self._packager.pick_first(out_dir, exts={".mp3"})
@@ -227,7 +244,9 @@ class YouTubeProcessor:
         height: Optional[int],
         split_title: bool,
         cookies_path: str | None,
-        progress_cb: Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None = None,
+        progress_cb: (
+            Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None
+        ) = None,
     ) -> ProcessResult:
         outtmpl = str(out_dir / "%(title).200s.%(ext)s")
         noplaylist = not is_playlist
@@ -239,7 +258,12 @@ class YouTubeProcessor:
             fmt = "bv*+ba/b"
 
         hook = self._build_progress_hook(progress_cb, is_playlist=is_playlist)
-        opts = self._common_opts(outtmpl=outtmpl, noplaylist=noplaylist, cookies_path=cookies_path, progress_hook=hook)
+        opts = self._common_opts(
+            outtmpl=outtmpl,
+            noplaylist=noplaylist,
+            cookies_path=cookies_path,
+            progress_hook=hook,
+        )
         opts["parse_metadata"] = self._parse_metadata_rules(split_title)
 
         opts.update(
@@ -273,7 +297,9 @@ class YouTubeProcessor:
             if progress_cb:
                 progress_cb(100, "done", 0, 0)
 
-            return ProcessResult(output_path=sel.path, output_type=sel.output_type, is_playlist=True)
+            return ProcessResult(
+                output_path=sel.path, output_type=sel.output_type, is_playlist=True
+            )
 
         # Single-file output: pick the first produced video file.
         sel = self._packager.pick_first(out_dir, exts={".mp4", ".mkv", ".webm"})
@@ -281,7 +307,9 @@ class YouTubeProcessor:
         if progress_cb:
             progress_cb(100, "done", 0, 0)
 
-        return ProcessResult(output_path=sel.path, output_type=sel.output_type, is_playlist=False)
+        return ProcessResult(
+            output_path=sel.path, output_type=sel.output_type, is_playlist=False
+        )
 
     def _metadata_postprocessors(self) -> list[dict]:
         pps: list[dict] = []
@@ -302,7 +330,12 @@ class YouTubeProcessor:
             return False
 
         # If extractor already provided structured music metadata, do not override it.
-        if info.get("artist") or info.get("album") or info.get("track") or info.get("album_artist"):
+        if (
+            info.get("artist")
+            or info.get("album")
+            or info.get("track")
+            or info.get("album_artist")
+        ):
             return False
         if info.get("artists"):
             return False
@@ -353,7 +386,11 @@ class YouTubeProcessor:
             speed_bps = int(speed) if isinstance(speed, (int, float)) else None
 
             percent = None
-            if isinstance(total, (int, float)) and isinstance(downloaded, (int, float)) and total > 0:
+            if (
+                isinstance(total, (int, float))
+                and isinstance(downloaded, (int, float))
+                and total > 0
+            ):
                 item_pct = int(min(99, (downloaded / total) * 100))
 
                 if is_playlist:
@@ -372,7 +409,6 @@ class YouTubeProcessor:
             progress_cb(percent, stage, eta_seconds, speed_bps)
 
         return hook
-    
 
     def _build_item_progress_hook(self, progress_cb, idx: int, total: int):
         def hook(d: dict):
@@ -390,7 +426,11 @@ class YouTubeProcessor:
             downloaded = d.get("downloaded_bytes")
 
             pct = None
-            if isinstance(total_bytes, (int, float)) and isinstance(downloaded, (int, float)) and total_bytes > 0:
+            if (
+                isinstance(total_bytes, (int, float))
+                and isinstance(downloaded, (int, float))
+                and total_bytes > 0
+            ):
                 item_pct = min(99, int((downloaded / total_bytes) * 100))
                 overall = ((idx - 1) + (item_pct / 100.0)) / max(1, total) * 100.0
                 pct = min(99, int(overall))
@@ -418,14 +458,25 @@ class YouTubeProcessor:
     ):
         outtmpl = str(out_dir / f"{prefix}%(title).200s.%(ext)s")
         hook = self._build_item_progress_hook(progress_cb, idx, total)
-        opts = self._common_opts(outtmpl=outtmpl, noplaylist=True, cookies_path=cookies_path, progress_hook=hook)
+        opts = self._common_opts(
+            outtmpl=outtmpl,
+            noplaylist=True,
+            cookies_path=cookies_path,
+            progress_hook=hook,
+        )
 
-        opts["parse_metadata"] = self._parse_metadata_rules(split_title=False)  # keep conservative in playlists
+        opts["parse_metadata"] = self._parse_metadata_rules(
+            split_title=False
+        )  # keep conservative in playlists
         opts.update(
             {
                 "format": "bestaudio/best",
                 "postprocessors": [
-                    {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "0"},
+                    {
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "0",
+                    },
                     *self._metadata_postprocessors(),
                 ],
             }
@@ -442,7 +493,6 @@ class YouTubeProcessor:
         # fallback (rare)
         return self._packager.pick_first(out_dir, exts={".mp3"}).path
 
-
     def _download_one_video(
         self,
         item_url: str,
@@ -456,7 +506,12 @@ class YouTubeProcessor:
     ):
         outtmpl = str(out_dir / f"{prefix}%(title).200s.%(ext)s")
         hook = self._build_item_progress_hook(progress_cb, idx, total)
-        opts = self._common_opts(outtmpl=outtmpl, noplaylist=True, cookies_path=cookies_path, progress_hook=hook)
+        opts = self._common_opts(
+            outtmpl=outtmpl,
+            noplaylist=True,
+            cookies_path=cookies_path,
+            progress_hook=hook,
+        )
 
         if height:
             fmt = f"bv*[height<={height}]+ba/b[height<={height}]"
@@ -498,8 +553,11 @@ class YouTubeProcessor:
         out_dir: Path,
         cookies_path: str | None,
         progress_cb=None,
-    ):
-        playlist_title, entries = self._extract_playlist_entries(playlist_url, cookies_path)
+    ) -> ProcessResult:
+
+        playlist_title, entries = self._extract_playlist_entries(
+            playlist_url, cookies_path
+        )
         total = len(entries)
 
         success_files: list[Path] = []
@@ -512,7 +570,9 @@ class YouTubeProcessor:
             prefix = self._make_prefix(i, total)
             video_id = e.get("id") or e.get("url")
             title = e.get("title")
-            item_url = e.get("webpage_url") or (f"https://www.youtube.com/watch?v={video_id}" if video_id else None)
+            item_url = e.get("webpage_url") or (
+                f"https://www.youtube.com/watch?v={video_id}" if video_id else None
+            )
 
             if not item_url:
                 failures.append(
@@ -588,12 +648,23 @@ class YouTubeProcessor:
         if progress_cb:
             progress_cb(95, "packaging", None, None)
 
-        # Success criteria: at least 1 success
+        # Some succeeded -> return ZIP with report included
         if success_files:
             zip_path = out_dir / "result.zip"
-            # include report.json in the zip for the user
             self._packager.zip_files(zip_path, success_files + [report_path])
-            return zip_path
+            # return with playlist stats
+            return ProcessResult(
+                output_path=zip_path,
+                output_type="zip",
+                is_playlist=True,
+                playlist_total=total,
+                playlist_succeeded=len(success_files),
+                playlist_failed=len(failures),
+            )
 
         # All failed
-        raise AllPlaylistItemsFailed("All playlist items failed. See report.json for details.")
+        raise AllPlaylistItemsFailed(
+            "All playlist items failed. See report.json for details.",
+            total=total,
+            failed=len(failures),
+        )
