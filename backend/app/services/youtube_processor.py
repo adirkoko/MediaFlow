@@ -128,7 +128,9 @@ class YouTubeProcessor:
             "restrictfilenames": False,
             "quiet": True,
             "no_warnings": True,
-            "retries": 3,
+            "retries": settings.ytdlp_retries,
+            "fragment_retries": settings.ytdlp_fragment_retries,
+            "extractor_retries": settings.ytdlp_extractor_retries,
             "ffmpeg_location": str(ffmpeg_bin),
         }
 

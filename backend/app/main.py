@@ -1,6 +1,7 @@
 # backend/app/main.py
 import asyncio
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes_auth import router as auth_router
 from app.api.routes_health import router as health_router
@@ -16,6 +17,17 @@ from app.services.cleanup import OutputsCleaner
 setup_logging()
 
 app = FastAPI(title=settings.app_name)
+
+# CORS for frontend dev (configurable via env)
+allowed_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Routers
 app.include_router(health_router)

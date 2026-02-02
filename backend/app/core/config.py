@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     app_name: str = "MediaFlow Backend"
     env: str = "dev"
+    cors_origins: str
 
     # Auth
     jwt_secret: str = "CHANGE_ME"
@@ -37,6 +38,9 @@ class Settings(BaseSettings):
     # Backoff
     max_attempts: int = 4
     backoff_base_seconds: float = 2.0
+    ytdlp_retries: int = 0
+    ytdlp_fragment_retries: int = 0
+    ytdlp_extractor_retries: int = 0
 
     # Optional cookies (for legit authenticated access)
     cookies_file: str | None = None  # set in .env as an absolute path

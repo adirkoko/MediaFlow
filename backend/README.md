@@ -8,7 +8,7 @@ This repository is intentionally **not** an enterprise platform. It is a lightwe
 
 ## Features
 
-- **Authenticated access** (username/password → JWT Bearer token).
+- **Authenticated access** (username/password -> JWT Bearer token).
 - **Jobs API** for single videos or playlists:
   - Audio or video output
   - Quality selection (e.g., `best`, `720p`, `1080p`)
@@ -145,10 +145,11 @@ pip install -r requirements.txt
 ```
 
 ### 3) Create `.env`
-Copy `.env.example` → `.env` and set values as needed:
+Copy `.env.example` -> `.env` and set values as needed:
 
 ```env
 JWT_SECRET=CHANGE_ME_TO_A_LONG_RANDOM_VALUE
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 ```
 
 > Do not commit `.env`.
@@ -193,6 +194,7 @@ Common settings:
 | `APP_NAME` | `MediaFlow Backend` | Service name |
 | `ENV` | `dev` | Environment label |
 | `JWT_SECRET` | `CHANGE_ME` | JWT signing secret (must override) |
+| `CORS_ORIGINS` | *(required)* | Comma-separated allowed origins (e.g., `http://localhost:3000`) |
 | `JWT_ALGORITHM` | `HS256` | JWT algorithm |
 | `JWT_EXP_MINUTES` | `60` | Token lifetime |
 | `USERS_FILE` | `data/users.json` | Users store path |
@@ -209,6 +211,9 @@ Common settings:
 | `THUMBNAIL_CONVERT_FORMAT` | `jpg` | Convert thumbnails to this format |
 | `MAX_ATTEMPTS` | `4` | Retries for transient errors (backoff) |
 | `BACKOFF_BASE_SECONDS` | `2.0` | Backoff base delay |
+| `YTDLP_RETRIES` | `0` | yt-dlp retry attempts (network/HTTP) |
+| `YTDLP_FRAGMENT_RETRIES` | `0` | yt-dlp retry attempts for fragments |
+| `YTDLP_EXTRACTOR_RETRIES` | `0` | yt-dlp retry attempts for extractor |
 | `COOKIES_FILE` | *(empty)* | Optional absolute path to cookies.txt (see below) |
 
 ---
@@ -241,15 +246,15 @@ Bearer <access_token>
 - `GET /health`
 
 ### Jobs
-- `POST /jobs` — create job (audio/video, quality, url)
-- `GET /jobs` — list last jobs for current user (default 50)
-- `GET /jobs/{job_id}` — get job status + metadata + progress
-- `GET /jobs/{job_id}/download` — download output file (mp3/mp4/zip)
-- `GET /jobs/{job_id}/report` — download the detailed `report.json` for playlists.
-- `GET /jobs/{job_id}/events` — **SSE** live progress stream
+- `POST /jobs` -- create job (audio/video, quality, url)
+- `GET /jobs` -- list last jobs for current user (default 50)
+- `GET /jobs/{job_id}` -- get job status + metadata + progress
+- `GET /jobs/{job_id}/download` -- download output file (mp3/mp4/zip)
+- `GET /jobs/{job_id}/report` -- download the detailed `report.json` for playlists.
+- `GET /jobs/{job_id}/events` -- **SSE** live progress stream
 
 ### Usage
-- `GET /me/usage` — basic per-user usage summary
+- `GET /me/usage` -- basic per-user usage summary
 
 ---
 
@@ -402,6 +407,10 @@ Security notes:
 
 ### 429 Too many active jobs
 - You hit the per-user active job quota. Wait for queued/running jobs to finish, or increase `MAX_ACTIVE_JOBS_PER_USER`.
+
+### Too many retry attempts on download errors
+- `MAX_ATTEMPTS` controls the worker retry count.
+- `YTDLP_RETRIES`, `YTDLP_FRAGMENT_RETRIES`, and `YTDLP_EXTRACTOR_RETRIES` control yt-dlp internal retries.
 
 ### Job succeeded but download fails
 - Check `output_filename`/`output_type` in `GET /jobs/{job_id}`.
