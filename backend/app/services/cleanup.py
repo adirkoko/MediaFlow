@@ -27,9 +27,14 @@ class CleanupStats:
 class OutputsCleaner:
     async def run_forever(self) -> None:
         interval = max(1, settings.outputs_cleanup_interval_minutes) * 60
+        ttl_label = (
+            f"{settings.outputs_ttl_minutes}m"
+            if settings.outputs_ttl_minutes
+            else f"{settings.outputs_ttl_hours}h"
+        )
         log.info(
-            "OutputsCleaner started (ttl_hours=%s, interval_min=%s)",
-            settings.outputs_ttl_hours,
+            "OutputsCleaner started (ttl=%s, interval_min=%s)",
+            ttl_label,
             settings.outputs_cleanup_interval_minutes,
         )
         while True:
@@ -46,7 +51,10 @@ class OutputsCleaner:
             await asyncio.sleep(interval)
 
     def cleanup_once(self) -> CleanupStats:
-        ttl = timedelta(hours=max(1, settings.outputs_ttl_hours))
+        if settings.outputs_ttl_minutes and settings.outputs_ttl_minutes > 0:
+            ttl = timedelta(minutes=settings.outputs_ttl_minutes)
+        else:
+            ttl = timedelta(hours=max(1, settings.outputs_ttl_hours))
         cutoff = datetime.now(timezone.utc) - ttl
 
         outputs_root = Path(settings.outputs_dir)

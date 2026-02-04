@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     # Output cleanup
     outputs_ttl_hours: int = 24
+    outputs_ttl_minutes: int | None = None
     outputs_cleanup_interval_minutes: int = 60
 
     # Metadata embedding

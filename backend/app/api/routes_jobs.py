@@ -1,7 +1,8 @@
 # backend/app/api/routes_jobs.py
 import asyncio
 import json
-from fastapi import APIRouter, Depends, HTTPException
+import shutil
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
 from pathlib import Path
@@ -79,8 +80,17 @@ def get_job(job_id: str, username: str = Depends(get_current_username)) -> JobRe
     )
 
 
+def _delete_output_dir(out_dir: Path) -> None:
+    if out_dir.exists():
+        shutil.rmtree(out_dir, ignore_errors=True)
+
+
 @router.get("/{job_id}/download")
-def download(job_id: str, username: str = Depends(get_current_username)):
+def download(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    username: str = Depends(get_current_username),
+):
     store = JobsStore()
     job = store.get_job(job_id)
 
@@ -101,6 +111,7 @@ def download(job_id: str, username: str = Depends(get_current_username)):
     if job.output_filename:
         p = out_dir / job.output_filename
         if p.exists():
+            background_tasks.add_task(_delete_output_dir, out_dir)
             return FileResponse(path=str(p), filename=p.name)
 
     # 2. Check for common result names (if DB record is empty)
@@ -108,12 +119,14 @@ def download(job_id: str, username: str = Depends(get_current_username)):
     for name in candidates:
         p = out_dir / name
         if p.exists():
+            background_tasks.add_task(_delete_output_dir, out_dir)
             return FileResponse(path=str(p), filename=p.name)
 
     # 3. Last resort: Return the first relevant file in directory
     valid_extensions = {".mp3", ".mp4", ".mkv", ".webm", ".zip"}
     for p in out_dir.iterdir():
         if p.is_file() and p.suffix.lower() in valid_extensions:
+            background_tasks.add_task(_delete_output_dir, out_dir)
             return FileResponse(path=str(p), filename=p.name)
 
     raise HTTPException(status_code=500, detail="No downloadable output found")
