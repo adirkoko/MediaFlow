@@ -1,4 +1,4 @@
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "https://mediaflow-ant2.onrender.com";
 
 const els = {
   username: document.getElementById("username"),
