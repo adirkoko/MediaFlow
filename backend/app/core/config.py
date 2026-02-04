@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pathlib import Path
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
@@ -14,9 +14,7 @@ class Settings(BaseSettings):
     jwt_exp_minutes: int = 60
 
     # Paths
-    BASE_DIR = Path(__file__).resolve().parent.parent.parent
-
-    USERS_FILE = str(BASE_DIR / "data" / "users.json")    
+    users_file: str = "data/users.json"
     db_path: str = "data/app.sqlite"
     outputs_dir: str = "outputs"
 
