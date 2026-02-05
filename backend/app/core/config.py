@@ -2,11 +2,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     app_name: str = "MediaFlow Backend"
     env: str = "dev"
-    cors_origins: str
+    cors_origins: str | None = None
 
     # Auth
     jwt_secret: str = "CHANGE_ME"
@@ -34,7 +36,9 @@ class Settings(BaseSettings):
 
     # Quota & dedup
     max_active_jobs_per_user: int = 2
-    dedup_window_minutes: int = 60  # within this window, same request reuses existing job
+    dedup_window_minutes: int = (
+        60  # within this window, same request reuses existing job
+    )
 
     # Backoff
     max_attempts: int = 4
@@ -45,5 +49,6 @@ class Settings(BaseSettings):
 
     # Optional cookies (for legit authenticated access)
     cookies_file: str | None = None  # set in .env as an absolute path
+
 
 settings = Settings()

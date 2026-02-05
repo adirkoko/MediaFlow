@@ -11,9 +11,6 @@ users.json
 *.sqlite
 data/
 
-# EDUCATIONAL ONLY: Included for demo/testing. Remove in production.
-!data/users.json 
-
 # Binaries
 bin/
 *.exe
