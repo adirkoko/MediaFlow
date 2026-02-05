@@ -13,10 +13,10 @@ def login(payload: LoginRequest) -> TokenResponse:
     store = UsersStore()
     user = store.get_user(payload.username)
     if not user:
-        raise unauthorized("Invalid credentials")
+        raise unauthorized("User not found")
 
     if not verify_password(payload.password, user.password_hash):
-        raise unauthorized("Invalid credentials")
+        raise unauthorized("Incorrect password")
 
     token = create_access_token(subject=user.username)
     return TokenResponse(access_token=token)

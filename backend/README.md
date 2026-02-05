@@ -456,7 +456,7 @@ By accessing, downloading, or using this software, you explicitly agree to the f
 
 **Use this tool responsibly and respect the rights of content creators.**
 
-## 🎖 Acknowledgements & Third-Party Licenses
+## Acknowledgements & Third-Party Licenses
 
 This project leverages powerful open-source tools. We gratefully acknowledge their contributions:
 
