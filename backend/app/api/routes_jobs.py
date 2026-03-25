@@ -2,6 +2,7 @@
 import asyncio
 import json
 import shutil
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
@@ -10,9 +11,18 @@ from app.core.exceptions import QuotaExceeded
 from app.core.deps import get_current_username
 from app.core.config import settings
 from app.infrastructure.jobs_store import JobsStore
-from app.models.schemas import CreateJobRequest, CreateJobResponse, JobResponse
+from app.models.schemas import (
+    CreateJobRequest,
+    CreateJobResponse,
+    CancelJobResponse,
+    JobResponse,
+)
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 @router.post("", response_model=CreateJobResponse)
@@ -78,6 +88,62 @@ def get_job(job_id: str, username: str = Depends(get_current_username)) -> JobRe
         playlist_succeeded=job.playlist_succeeded,
         playlist_failed=job.playlist_failed,
     )
+
+
+@router.post("/{job_id}/cancel", response_model=CancelJobResponse)
+async def cancel_job(
+    job_id: str, username: str = Depends(get_current_username)
+) -> CancelJobResponse:
+    from app.main import get_manager  # noqa
+
+    store = JobsStore()
+    job = store.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user != username:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    manager = get_manager()
+    now = _utc_now()
+
+    if job.status == "queued":
+        manager.request_cancel(job_id)
+        store.update_progress(
+            job_id,
+            None,
+            "canceled",
+            updated_at=now,
+            eta_seconds=None,
+            speed_bps=None,
+        )
+        store.update_status(
+            job_id,
+            "canceled",
+            finished_at=now,
+            error_message="Job canceled by user",
+            error_code="CANCELED",
+        )
+        return CancelJobResponse(job_id=job_id, status="canceled", cancel_requested=True)
+
+    if job.status == "running":
+        manager.request_cancel(job_id)
+        store.update_progress(
+            job_id,
+            None,
+            "cancel requested",
+            updated_at=now,
+            eta_seconds=None,
+            speed_bps=None,
+        )
+        return CancelJobResponse(job_id=job_id, status="running", cancel_requested=True)
+
+    if job.status == "canceled":
+        return CancelJobResponse(
+            job_id=job_id, status="canceled", cancel_requested=False
+        )
+
+    raise HTTPException(status_code=409, detail=f"Cannot cancel job in status={job.status}")
 
 
 def _delete_output_dir(out_dir: Path) -> None:
@@ -202,7 +268,7 @@ async def job_events(job_id: str, username: str = Depends(get_current_username))
                 yield f"data: {s}\n\n"
 
             # stop streaming once finished
-            if j.status in ("succeeded", "failed"):
+            if j.status in ("succeeded", "failed", "canceled"):
                 break
 
             await asyncio.sleep(1)

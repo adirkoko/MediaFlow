@@ -13,6 +13,7 @@ from app.services.job_manager import JobManager
 from app.services.worker import Worker
 from app.api.routes_usage import router as usage_router
 from app.services.cleanup import OutputsCleaner
+from app.services.startup_reconciliation import reconcile_active_jobs_on_startup
 
 setup_logging()
 
@@ -47,6 +48,7 @@ def get_manager() -> JobManager:
 @app.on_event("startup")
 async def on_startup() -> None:
     ensure_db_initialized()
+    reconcile_active_jobs_on_startup()
     # Ensure outputs dir exists
     import os
 

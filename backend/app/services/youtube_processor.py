@@ -8,7 +8,7 @@ from typing import Callable, Optional
 from app.core.config import settings
 from app.services.packaging import OutputPackager
 from app.services.reporting import ReportWriter, PlaylistReport, PlaylistFailure
-from app.core.exceptions import AllPlaylistItemsFailed
+from app.core.exceptions import AllPlaylistItemsFailed, JobCanceled
 from app.services.error_codes import classify_error  # reuse your classifier
 
 
@@ -52,7 +52,9 @@ class YouTubeProcessor:
         progress_cb: (
             Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None
         ) = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> ProcessResult:
+        self._ensure_not_canceled(should_cancel)
         out_dir = Path(settings.outputs_dir) / job_id
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -62,6 +64,7 @@ class YouTubeProcessor:
             probe_opts["cookiefile"] = cookies_path
 
         with yt_dlp.YoutubeDL(probe_opts) as ydl:
+            self._ensure_not_canceled(should_cancel)
             info = ydl.extract_info(url, download=False, process=False)
 
         is_playlist = bool(
@@ -80,10 +83,12 @@ class YouTubeProcessor:
                 out_dir=out_dir,
                 cookies_path=cookies_path,
                 progress_cb=progress_cb,
+                should_cancel=should_cancel,
             )
 
         # Single item path: now we can extract full info (safe to decide split_title)
         with yt_dlp.YoutubeDL(probe_opts) as ydl:
+            self._ensure_not_canceled(should_cancel)
             full_info = ydl.extract_info(url, download=False)
 
         split_title = self._should_split_title(full_info or {}, url, is_playlist=False)
@@ -96,6 +101,7 @@ class YouTubeProcessor:
                 split_title=split_title,
                 cookies_path=cookies_path,
                 progress_cb=progress_cb,
+                should_cancel=should_cancel,
             )
 
         if mode == "video":
@@ -107,6 +113,7 @@ class YouTubeProcessor:
                 split_title=split_title,
                 cookies_path=cookies_path,
                 progress_cb=progress_cb,
+                should_cancel=should_cancel,
             )
 
         raise ValueError(f"Unsupported mode: {mode}")
@@ -148,6 +155,10 @@ class YouTubeProcessor:
 
         return opts
 
+    def _ensure_not_canceled(self, should_cancel: Callable[[], bool] | None) -> None:
+        if should_cancel and should_cancel():
+            raise JobCanceled("Job canceled by user")
+
     def _extract_playlist_entries(
         self, url: str, cookies_path: str | None
     ) -> tuple[str, list[dict]]:
@@ -176,13 +187,17 @@ class YouTubeProcessor:
         progress_cb: (
             Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None
         ) = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> ProcessResult:
+        self._ensure_not_canceled(should_cancel)
         # We keep the output template identical for single vs playlist;
         # yt-dlp decides naming per-item.
         outtmpl = str(out_dir / "%(title).200s.%(ext)s")
         noplaylist = not is_playlist
 
-        hook = self._build_progress_hook(progress_cb, is_playlist=is_playlist)
+        hook = self._build_progress_hook(
+            progress_cb, is_playlist=is_playlist, should_cancel=should_cancel
+        )
         opts = self._common_opts(
             outtmpl=outtmpl,
             noplaylist=noplaylist,
@@ -211,6 +226,7 @@ class YouTubeProcessor:
             progress_cb(0, "starting", None, None)
 
         with yt_dlp.YoutubeDL(opts) as ydl:
+            self._ensure_not_canceled(should_cancel)
             ydl.download([url])
 
         if progress_cb:
@@ -249,7 +265,9 @@ class YouTubeProcessor:
         progress_cb: (
             Callable[[Optional[int], str, Optional[int], Optional[int]], None] | None
         ) = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> ProcessResult:
+        self._ensure_not_canceled(should_cancel)
         outtmpl = str(out_dir / "%(title).200s.%(ext)s")
         noplaylist = not is_playlist
 
@@ -259,7 +277,9 @@ class YouTubeProcessor:
         else:
             fmt = "bv*+ba/b"
 
-        hook = self._build_progress_hook(progress_cb, is_playlist=is_playlist)
+        hook = self._build_progress_hook(
+            progress_cb, is_playlist=is_playlist, should_cancel=should_cancel
+        )
         opts = self._common_opts(
             outtmpl=outtmpl,
             noplaylist=noplaylist,
@@ -282,6 +302,7 @@ class YouTubeProcessor:
             progress_cb(0, "starting", None, None)
 
         with yt_dlp.YoutubeDL(opts) as ydl:
+            self._ensure_not_canceled(should_cancel)
             ydl.download([url])
 
         if progress_cb:
@@ -365,8 +386,14 @@ class YouTubeProcessor:
         ]
         return rules
 
-    def _build_progress_hook(self, progress_cb, is_playlist: bool):
+    def _build_progress_hook(
+        self,
+        progress_cb,
+        is_playlist: bool,
+        should_cancel: Callable[[], bool] | None = None,
+    ):
         def hook(d: dict):
+            self._ensure_not_canceled(should_cancel)
             if not progress_cb:
                 return
 
@@ -412,8 +439,15 @@ class YouTubeProcessor:
 
         return hook
 
-    def _build_item_progress_hook(self, progress_cb, idx: int, total: int):
+    def _build_item_progress_hook(
+        self,
+        progress_cb,
+        idx: int,
+        total: int,
+        should_cancel: Callable[[], bool] | None = None,
+    ):
         def hook(d: dict):
+            self._ensure_not_canceled(should_cancel)
             if not progress_cb:
                 return
 
@@ -457,9 +491,13 @@ class YouTubeProcessor:
         progress_cb=None,
         idx: int = 1,
         total: int = 1,
+        should_cancel: Callable[[], bool] | None = None,
     ):
+        self._ensure_not_canceled(should_cancel)
         outtmpl = str(out_dir / f"{prefix}%(title).200s.%(ext)s")
-        hook = self._build_item_progress_hook(progress_cb, idx, total)
+        hook = self._build_item_progress_hook(
+            progress_cb, idx, total, should_cancel=should_cancel
+        )
         opts = self._common_opts(
             outtmpl=outtmpl,
             noplaylist=True,
@@ -485,6 +523,7 @@ class YouTubeProcessor:
         )
 
         with yt_dlp.YoutubeDL(opts) as ydl:
+            self._ensure_not_canceled(should_cancel)
             ydl.download([item_url])
 
         # pick the produced mp3 for this prefix
@@ -505,9 +544,13 @@ class YouTubeProcessor:
         progress_cb=None,
         idx: int = 1,
         total: int = 1,
+        should_cancel: Callable[[], bool] | None = None,
     ):
+        self._ensure_not_canceled(should_cancel)
         outtmpl = str(out_dir / f"{prefix}%(title).200s.%(ext)s")
-        hook = self._build_item_progress_hook(progress_cb, idx, total)
+        hook = self._build_item_progress_hook(
+            progress_cb, idx, total, should_cancel=should_cancel
+        )
         opts = self._common_opts(
             outtmpl=outtmpl,
             noplaylist=True,
@@ -530,6 +573,7 @@ class YouTubeProcessor:
         )
 
         with yt_dlp.YoutubeDL(opts) as ydl:
+            self._ensure_not_canceled(should_cancel)
             ydl.download([item_url])
 
         # prefer mp4
@@ -555,7 +599,9 @@ class YouTubeProcessor:
         out_dir: Path,
         cookies_path: str | None,
         progress_cb=None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> ProcessResult:
+        self._ensure_not_canceled(should_cancel)
 
         playlist_title, entries = self._extract_playlist_entries(
             playlist_url, cookies_path
@@ -569,6 +615,7 @@ class YouTubeProcessor:
             progress_cb(0, "extracting playlist", None, None)
 
         for i, e in enumerate(entries, start=1):
+            self._ensure_not_canceled(should_cancel)
             prefix = self._make_prefix(i, total)
             video_id = e.get("id") or e.get("url")
             title = e.get("title")
@@ -604,6 +651,7 @@ class YouTubeProcessor:
                         progress_cb=progress_cb,
                         idx=i,
                         total=total,
+                        should_cancel=should_cancel,
                     )
                     success_files.append(p)
                 else:
@@ -616,10 +664,13 @@ class YouTubeProcessor:
                         progress_cb=progress_cb,
                         idx=i,
                         total=total,
+                        should_cancel=should_cancel,
                     )
                     success_files.append(p)
 
             except Exception as ex:
+                if isinstance(ex, JobCanceled):
+                    raise
                 failures.append(
                     PlaylistFailure(
                         index=i,

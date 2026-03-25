@@ -25,6 +25,7 @@ class MediaMode(str, Enum):
 class JobStatus(str, Enum):
     queued = "queued"
     running = "running"
+    canceled = "canceled"
     succeeded = "succeeded"
     failed = "failed"
 
@@ -39,6 +40,12 @@ class CreateJobResponse(BaseModel):
     job_id: str
     status: JobStatus
     reused: bool = False
+
+
+class CancelJobResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    cancel_requested: bool = True
 
 
 class JobResponse(BaseModel):

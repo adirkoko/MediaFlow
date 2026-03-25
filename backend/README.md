@@ -192,8 +192,12 @@ uvicorn app.main:app --reload
 
 For Ubuntu Server deployment using one compose stack (backend + frontend + persistent external data), use:
 - `../docker-compose.yml`
-- `../prod.env.example`
+- `../.env.production.example`
 - `../DEPLOY.md`
+
+On startup, the backend performs **startup reconciliation**:
+- Any stale `queued` / `running` jobs from a previous process are automatically moved to `failed`.
+- Those jobs receive `error_code=SERVER_RESTART` and an explanatory error message.
 
 ---
 
@@ -262,6 +266,7 @@ Bearer <access_token>
 
 ### Jobs
 - `POST /jobs` -- create job (audio/video, quality, url)
+- `POST /jobs/{job_id}/cancel` -- request cancellation (`queued` cancels immediately, `running` cancels cooperatively)
 - `GET /jobs` -- list last jobs for current user (default 50)
 - `GET /jobs/{job_id}` -- get job status + metadata + progress
 - `GET /jobs/{job_id}/download` -- download output file (mp3/mp4/zip)
@@ -317,6 +322,22 @@ curl -L -H "Authorization: Bearer $TOKEN" \
   "http://127.0.0.1:8000/jobs/<job_id>/download" \
   -o output.bin
 ```
+
+---
+
+## Cancel a Running/Queued Job
+
+You can cancel an active job:
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  "http://127.0.0.1:8000/jobs/<job_id>/cancel"
+```
+
+Behavior:
+- `queued` -> transitions to `canceled` immediately.
+- `running` -> marked as cancel-requested, then transitions to `canceled` once the worker stops safely.
+- `succeeded` / `failed` -> cancel is rejected with `409`.
 
 ---
 
@@ -389,6 +410,7 @@ backend/outputs/<job_id>/
 
 A background cleanup task periodically deletes old job folders based on:
 - `OUTPUTS_TTL_HOURS`
+- `OUTPUTS_TTL_MINUTES` (when `> 0`, overrides hours)
 - `OUTPUTS_CLEANUP_INTERVAL_MINUTES`
 
 ---

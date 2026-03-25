@@ -26,7 +26,7 @@ Clone/copy this repo into:
 
 ```bash
 cd /srv/services/mediaflow
-cp prod.env.example .env
+cp .env.production.example .env
 ```
 
 Edit `.env` and set at minimum:

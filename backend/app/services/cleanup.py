@@ -61,14 +61,14 @@ class OutputsCleaner:
         if not outputs_root.exists():
             return CleanupStats()
 
-        # Select jobs finished before cutoff (succeeded/failed only)
+        # Select jobs finished before cutoff (terminal states only)
         with get_conn() as conn:
             rows = conn.execute(
                 """
                 SELECT job_id
                 FROM jobs
                 WHERE finished_at IS NOT NULL
-                  AND status IN ('succeeded', 'failed')
+                  AND status IN ('succeeded', 'failed', 'canceled')
                 """
             ).fetchall()
 

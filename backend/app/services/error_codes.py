@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.core.exceptions import AllPlaylistItemsFailed
+from app.core.exceptions import AllPlaylistItemsFailed, JobCanceled
 
 
 def classify_error(exc: Exception) -> str:
@@ -8,6 +8,8 @@ def classify_error(exc: Exception) -> str:
     # Handle explicit domain exceptions first (most reliable).
     if isinstance(exc, AllPlaylistItemsFailed):
         return "ALL_ITEMS_FAILED"
+    if isinstance(exc, JobCanceled):
+        return "CANCELED"
 
     msg = str(exc).lower()
     name = exc.__class__.__name__.lower()

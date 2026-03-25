@@ -7,3 +7,7 @@ class AllPlaylistItemsFailed(Exception):
         super().__init__(message)
         self.total = total
         self.failed = failed
+
+
+class JobCanceled(Exception):
+    pass

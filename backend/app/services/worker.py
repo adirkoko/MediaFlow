@@ -13,7 +13,7 @@ from app.services.error_codes import classify_error
 from app.services.job_logging import JobLogger
 from app.services.job_manager import JobManager
 from app.services.youtube_processor import YouTubeProcessor
-from app.core.exceptions import AllPlaylistItemsFailed
+from app.core.exceptions import AllPlaylistItemsFailed, JobCanceled
 
 log = logging.getLogger("worker")
 
@@ -43,8 +43,18 @@ class Worker:
         async with self._semaphore:
             job = self._store.get_job(job_id)
             if not job:
+                self._manager.release_cancel_event(job_id)
                 log.warning("Job not found: %s", job_id)
                 return
+            if job.status != "queued":
+                self._manager.release_cancel_event(job_id)
+                log.info("Skipping job %s with status=%s", job_id, job.status)
+                return
+
+            cancel_event = self._manager.bind_cancel_event(job_id)
+
+            def should_cancel() -> bool:
+                return cancel_event.is_set()
 
             # Prepare job directory and per-job logger.
             out_dir = Path(settings.outputs_dir) / job_id
@@ -57,6 +67,8 @@ class Worker:
                 eta_seconds: int | None,
                 speed_bps: int | None,
             ) -> None:
+                if should_cancel():
+                    raise JobCanceled("Job canceled by user")
                 # Persist progress for polling + SSE.
                 self._store.update_progress(
                     job_id,
@@ -89,6 +101,9 @@ class Worker:
             cookies_handle = prepare_job_cookies(settings.cookies_file, job_id)
 
             try:
+                if should_cancel():
+                    raise JobCanceled("Job canceled by user")
+
                 # Initialize exponential backoff configuration from settings.
                 cfg = BackoffConfig(
                     max_attempts=settings.max_attempts,
@@ -107,10 +122,20 @@ class Worker:
                             str(cookies_handle.path) if cookies_handle else None
                         ),
                         progress_cb=progress_cb,
+                        should_cancel=should_cancel,
                     )
 
                 # Execute processor in a thread; wrap with backoff for transient failures.
-                result = await asyncio.to_thread(lambda: run_with_backoff(_run, cfg))
+                result = await asyncio.to_thread(
+                    lambda: run_with_backoff(
+                        _run,
+                        cfg,
+                        should_retry=lambda exc: not isinstance(exc, JobCanceled),
+                    )
+                )
+
+                if should_cancel():
+                    raise JobCanceled("Job canceled by user")
 
                 duration_ms = int((time.perf_counter() - t0) * 1000)
                 job_log.log(f"OUTPUT={result.output_path.name}")
@@ -123,6 +148,8 @@ class Worker:
                     eta_seconds=0,
                     speed_bps=0,
                 )
+                if should_cancel():
+                    raise JobCanceled("Job canceled by user")
 
                 # Mark the job as succeeded and store output metadata.
                 self._store.update_status(
@@ -148,6 +175,37 @@ class Worker:
                 )
 
                 log.info("Job %s succeeded", job_id)
+
+            except JobCanceled as e:
+                duration_ms = int((time.perf_counter() - t0) * 1000)
+                log.info("Job %s canceled by user", job_id)
+                job_log.log(f"CANCELED={e}")
+
+                self._store.update_progress(
+                    job_id,
+                    None,
+                    "canceled",
+                    updated_at=_utc_now(),
+                    eta_seconds=None,
+                    speed_bps=None,
+                )
+                self._store.update_status(
+                    job_id,
+                    "canceled",
+                    finished_at=_utc_now(),
+                    error_message=str(e),
+                    error_code="CANCELED",
+                )
+
+                is_playlist = "list=" in (job.url or "").lower()
+                self._usage.add_event(
+                    user=job.user,
+                    mode=job.mode,
+                    is_playlist=is_playlist,
+                    duration_ms=duration_ms,
+                    success=False,
+                    created_at=_utc_now(),
+                )
 
             except Exception as e:
                 duration_ms = int((time.perf_counter() - t0) * 1000)
@@ -196,3 +254,4 @@ class Worker:
                 # Always clean up the temporary cookie file.
                 if cookies_handle:
                     cookies_handle.cleanup()
+                self._manager.release_cancel_event(job_id)

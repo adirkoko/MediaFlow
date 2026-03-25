@@ -14,7 +14,11 @@ class BackoffConfig:
     base_delay_seconds: float
 
 
-def run_with_backoff(fn: Callable[[], T], cfg: BackoffConfig) -> T:
+def run_with_backoff(
+    fn: Callable[[], T],
+    cfg: BackoffConfig,
+    should_retry: Callable[[Exception], bool] | None = None,
+) -> T:
     attempts = max(1, cfg.max_attempts)
     base = max(0.1, cfg.base_delay_seconds)
 
@@ -23,6 +27,8 @@ def run_with_backoff(fn: Callable[[], T], cfg: BackoffConfig) -> T:
         try:
             return fn()
         except Exception as e:
+            if should_retry is not None and not should_retry(e):
+                raise
             last_exc = e
             if attempt == attempts:
                 raise

@@ -147,7 +147,22 @@ class JobsStore:
                 (user, fingerprint, cutoff_iso),
             ).fetchone()
             return str(row["job_id"]) if row else None
-        
+
+    def list_active_jobs(self, limit: int = 1000) -> list[JobRecord]:
+        limit = max(1, min(int(limit), 20000))
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM jobs
+                WHERE status IN ('queued', 'running')
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [JobRecord(**dict(r)) for r in rows]
+
     def list_jobs_for_user(self, user: str, limit: int = 50) -> list[JobRecord]:
         limit = max(1, min(int(limit), 200))
         with get_conn() as conn:

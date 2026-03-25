@@ -15,6 +15,7 @@ const els = {
   btnRefresh: document.getElementById("btn-refresh"),
   jobsBody: document.getElementById("jobs-body"),
   jobDetail: document.getElementById("job-detail"),
+  btnCancel: document.getElementById("btn-cancel"),
   btnDownload: document.getElementById("btn-download"),
   btnReport: document.getElementById("btn-report"),
   btnLive: document.getElementById("btn-live"),
@@ -131,6 +132,7 @@ function setBusy(isBusy) {
     els.btnLogout,
     els.btnCreate,
     els.btnRefresh,
+    els.btnCancel,
     els.btnDownload,
     els.btnReport,
     els.btnLive,
@@ -198,6 +200,7 @@ async function refreshJobs() {
 function statusPillClass(status) {
   if (status === "succeeded") return "rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] text-emerald-700";
   if (status === "failed") return "rounded-full bg-rose-100 px-2 py-0.5 text-[11px] text-rose-700";
+  if (status === "canceled") return "rounded-full bg-slate-200 px-2 py-0.5 text-[11px] text-slate-700";
   if (status === "running") return "rounded-full bg-blue-100 px-2 py-0.5 text-[11px] text-blue-700";
   if (status === "queued") return "rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700";
   return "rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600";
@@ -206,6 +209,7 @@ function statusPillClass(status) {
 function statusRowClass(status) {
   if (status === "succeeded") return "bg-emerald-50/40";
   if (status === "failed") return "bg-rose-50/40";
+  if (status === "canceled") return "bg-slate-100/70";
   if (status === "running") return "bg-blue-50/40";
   if (status === "queued") return "bg-amber-50/40";
   return "";
@@ -260,6 +264,20 @@ async function downloadReport() {
   showToast("Report download started");
 }
 
+async function cancelJob() {
+  if (!selectedJobId) return;
+  const data = await api(`/jobs/${selectedJobId}/cancel`, {
+    method: "POST",
+  });
+  await selectJob(selectedJobId);
+  await refreshJobs();
+  if (data.status === "running") {
+    showToast("Cancel requested");
+    return;
+  }
+  showToast(`Job ${data.status}`);
+}
+
 function appendEvent(text) {
   const div = document.createElement("div");
   div.textContent = text;
@@ -303,6 +321,9 @@ function updateLiveProgress(payload) {
     } else if (status === "failed") {
       els.liveStatus.className =
         "rounded-full bg-rose-100 px-2 py-0.5 text-[11px] text-rose-700";
+    } else if (status === "canceled") {
+      els.liveStatus.className =
+        "rounded-full bg-slate-200 px-2 py-0.5 text-[11px] text-slate-700";
     } else if (status === "running") {
       els.liveStatus.className =
         "rounded-full bg-blue-100 px-2 py-0.5 text-[11px] text-blue-700";
@@ -423,6 +444,15 @@ function bindEvents() {
     try {
       clearError();
       await selectJob(btn.dataset.id);
+    } catch (err) {
+      showError(err.message);
+    }
+  });
+
+  els.btnCancel.addEventListener("click", async () => {
+    try {
+      clearError();
+      await cancelJob();
     } catch (err) {
       showError(err.message);
     }
