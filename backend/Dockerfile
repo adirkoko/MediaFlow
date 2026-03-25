@@ -28,10 +28,9 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 # Copy application source
 COPY app ./app
-COPY data ./data
 
 # Ensure runtime directories exist
-RUN mkdir -p outputs data
+RUN mkdir -p outputs
 
 # ------------------------------------------------------------
 # Runtime

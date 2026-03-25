@@ -1,0 +1,65 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mediaflow-backend
+    restart: unless-stopped
+    environment:
+      ENV: ${MEDIAFLOW_ENV:-prod}
+      APP_NAME: ${MEDIAFLOW_APP_NAME:-MediaFlow Backend}
+      JWT_SECRET: ${MEDIAFLOW_JWT_SECRET}
+      JWT_ALGORITHM: ${MEDIAFLOW_JWT_ALGORITHM:-HS256}
+      JWT_EXP_MINUTES: ${MEDIAFLOW_JWT_EXP_MINUTES:-60}
+      CORS_ORIGINS: ${MEDIAFLOW_CORS_ORIGINS}
+      USERS_FILE: ${MEDIAFLOW_USERS_FILE:-/var/lib/mediaflow/data/users.json}
+      DB_PATH: ${MEDIAFLOW_DB_PATH:-/var/lib/mediaflow/data/app.sqlite}
+      OUTPUTS_DIR: ${MEDIAFLOW_OUTPUTS_DIR:-/var/lib/mediaflow/outputs}
+      OUTPUTS_TTL_HOURS: ${MEDIAFLOW_OUTPUTS_TTL_HOURS:-24}
+      OUTPUTS_TTL_MINUTES: ${MEDIAFLOW_OUTPUTS_TTL_MINUTES:-}
+      OUTPUTS_CLEANUP_INTERVAL_MINUTES: ${MEDIAFLOW_OUTPUTS_CLEANUP_INTERVAL_MINUTES:-60}
+      COOKIES_FILE: ${MEDIAFLOW_COOKIES_FILE:-}
+      MAX_PARALLEL_JOBS: ${MEDIAFLOW_MAX_PARALLEL_JOBS:-2}
+      QUEUE_MAX_SIZE: ${MEDIAFLOW_QUEUE_MAX_SIZE:-50}
+      MAX_ACTIVE_JOBS_PER_USER: ${MEDIAFLOW_MAX_ACTIVE_JOBS_PER_USER:-2}
+      DEDUP_WINDOW_MINUTES: ${MEDIAFLOW_DEDUP_WINDOW_MINUTES:-60}
+      MAX_ATTEMPTS: ${MEDIAFLOW_MAX_ATTEMPTS:-4}
+      BACKOFF_BASE_SECONDS: ${MEDIAFLOW_BACKOFF_BASE_SECONDS:-2.0}
+      YTDLP_RETRIES: ${MEDIAFLOW_YTDLP_RETRIES:-0}
+      YTDLP_FRAGMENT_RETRIES: ${MEDIAFLOW_YTDLP_FRAGMENT_RETRIES:-0}
+      YTDLP_EXTRACTOR_RETRIES: ${MEDIAFLOW_YTDLP_EXTRACTOR_RETRIES:-0}
+      EMBED_METADATA: ${MEDIAFLOW_EMBED_METADATA:-true}
+      EMBED_THUMBNAIL: ${MEDIAFLOW_EMBED_THUMBNAIL:-true}
+      THUMBNAIL_CONVERT_FORMAT: ${MEDIAFLOW_THUMBNAIL_CONVERT_FORMAT:-jpg}
+    volumes:
+      - ${HOST_MEDIAFLOW_DATA_ROOT:-/srv/data/mediaflow}/backend-data:/var/lib/mediaflow/data
+      - ${HOST_MEDIAFLOW_DATA_ROOT:-/srv/data/mediaflow}/outputs:/var/lib/mediaflow/outputs
+      - ${HOST_MEDIAFLOW_DATA_ROOT:-/srv/data/mediaflow}/secrets:/var/lib/mediaflow/secrets:ro
+    ports:
+      - "${MEDIAFLOW_BACKEND_PORT:-18080}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mediaflow-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      MEDIAFLOW_API_BASE: ${MEDIAFLOW_API_BASE:-/api}
+    ports:
+      - "${MEDIAFLOW_FRONTEND_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 10s

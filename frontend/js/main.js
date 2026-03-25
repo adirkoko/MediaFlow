@@ -1,4 +1,4 @@
-const API_BASE = "https://mediaflow-ant2.onrender.com";
+const API_BASE = resolveApiBase();
 
 const els = {
   username: document.getElementById("username"),
@@ -32,6 +32,20 @@ const els = {
 
 let selectedJobId = null;
 let liveAbort = null;
+
+function resolveApiBase() {
+  const runtime = window.MEDIAFLOW_API_BASE;
+  if (typeof runtime === "string" && runtime.trim().length > 0) {
+    return runtime.trim().replace(/\/+$/, "");
+  }
+  return "/api";
+}
+
+function updateApiBadge() {
+  const el = document.getElementById("api-base-label");
+  if (!el) return;
+  el.textContent = API_BASE.replace(/^https?:\/\//, "");
+}
 
 function getToken() {
   return localStorage.getItem("mf_token");
@@ -445,6 +459,7 @@ function bindEvents() {
 }
 
 function init() {
+  updateApiBadge();
   updateTokenStatus();
   initNavigation();
   bindEvents();
