@@ -219,7 +219,7 @@ Common settings:
 | `MAX_ACTIVE_JOBS_PER_USER` | `2` | Per-user quota for queued/running jobs |
 | `DEDUP_WINDOW_MINUTES` | `60` | Dedup window for identical requests |
 | `OUTPUTS_TTL_HOURS` | `24` | Output folder time-to-live (hours) |
-| `OUTPUTS_TTL_MINUTES` | *(empty)* | Output folder TTL in minutes (overrides hours when set) |
+| `OUTPUTS_TTL_MINUTES` | `0` | Minutes override for TTL. Use `0` to disable minutes and fall back to `OUTPUTS_TTL_HOURS`. |
 | `OUTPUTS_CLEANUP_INTERVAL_MINUTES` | `60` | Cleanup scheduler interval |
 | `EMBED_METADATA` | `true` | Embed tags (artist, title, album) into output |
 | `EMBED_THUMBNAIL` | `true` | Embed thumbnail as cover art |

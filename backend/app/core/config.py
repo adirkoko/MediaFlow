@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 
 
 class Settings(BaseSettings):
@@ -49,6 +50,14 @@ class Settings(BaseSettings):
 
     # Optional cookies (for legit authenticated access)
     cookies_file: str | None = None  # set in .env as an absolute path
+
+    @field_validator("outputs_ttl_minutes", mode="before")
+    @classmethod
+    def parse_outputs_ttl_minutes(cls, value: object) -> object:
+        # Allow empty env value (e.g. OUTPUTS_TTL_MINUTES=) to behave like "not set".
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return value
 
 
 settings = Settings()
