@@ -4,6 +4,11 @@ A small, clear, and practical **FastAPI** backend for downloading and processing
 
 This repository is intentionally **not** an enterprise platform. It is a lightweight tool designed for a controlled set of authorized users.
 
+## Where To Start
+
+- **Production (Ubuntu + Docker Compose):** see repository root [README.md](../README.md) and [DEPLOY.md](../DEPLOY.md).
+- **This file (`backend/README.md`):** backend-focused docs and local development flow.
+
 ---
 
 ## Features
@@ -89,6 +94,8 @@ backend/
   .env.example
   requirements.txt
 ```
+
+> In production, `data` and `outputs` can be external host paths by setting `USERS_FILE`, `DB_PATH`, and `OUTPUTS_DIR` (as configured by root-level compose/env files).
 
 ---
 
@@ -180,6 +187,13 @@ uvicorn app.main:app --reload
 
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - Health: `http://127.0.0.1:8000/health`
+
+## Production Deployment
+
+For Ubuntu Server deployment using one compose stack (backend + frontend + persistent external data), use:
+- `../docker-compose.yml`
+- `../prod.env.example`
+- `../DEPLOY.md`
 
 ---
 
