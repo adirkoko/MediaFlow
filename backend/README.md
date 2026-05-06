@@ -469,13 +469,15 @@ Security notes:
 - `MAX_ATTEMPTS` controls the worker retry count.
 - `YTDLP_RETRIES`, `YTDLP_FRAGMENT_RETRIES`, and `YTDLP_EXTRACTOR_RETRIES` control yt-dlp internal retries.
 
-### YouTube download fails with 403, empty file, or n challenge errors
+### YouTube download fails with 403, empty file, format unavailable, or n challenge errors
 
 YouTube may require yt-dlp to solve JavaScript challenges before media URLs can be downloaded.
 
 Ensure:
 - Node.js is installed and available as `node`.
 - yt-dlp is up to date.
+- The backend enables yt-dlp JavaScript challenge support with Node.js.
+- Remote EJS components are enabled for yt-dlp when required by YouTube.
 - If using authenticated access, `COOKIES_FILE` points to a valid Netscape-format `cookies.txt`.
 - Cookies are refreshed if yt-dlp reports that account cookies are no longer valid.
 

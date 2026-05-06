@@ -59,7 +59,7 @@ class YouTubeProcessor:
         out_dir.mkdir(parents=True, exist_ok=True)
 
         # 1) Safe detect: avoid processing playlist entries during probing
-        probe_opts = {"quiet": True, "no_warnings": True}
+        probe_opts = {"quiet": True, "no_warnings": True, **self._youtube_runtime_opts()}
         if cookies_path:
             probe_opts["cookiefile"] = cookies_path
 
@@ -139,10 +139,7 @@ class YouTubeProcessor:
             "fragment_retries": settings.ytdlp_fragment_retries,
             "extractor_retries": settings.ytdlp_extractor_retries,
             "ffmpeg_location": str(ffmpeg_bin),
-
-            # YouTube currently requires JS challenge solving for some formats.
-            "js_runtimes": {"node": "/usr/bin/node"},
-            "remote_components": {"ejs": "github"},
+            **self._youtube_runtime_opts(),
         }
 
         if cookies_path:
@@ -159,6 +156,14 @@ class YouTubeProcessor:
 
         return opts
 
+    def _youtube_runtime_opts(self) -> dict:
+        return {
+            "js_runtimes": {
+                "node": {"path": "/usr/bin/node"},
+            },
+            "remote_components": ["ejs:github"],
+        }
+
     def _ensure_not_canceled(self, should_cancel: Callable[[], bool] | None) -> None:
         if should_cancel and should_cancel():
             raise JobCanceled("Job canceled by user")
@@ -166,7 +171,7 @@ class YouTubeProcessor:
     def _extract_playlist_entries(
         self, url: str, cookies_path: str | None
     ) -> tuple[str, list[dict]]:
-        probe_opts = {"quiet": True, "no_warnings": True}
+        probe_opts = {"quiet": True, "no_warnings": True, **self._youtube_runtime_opts()}
         if cookies_path:
             probe_opts["cookiefile"] = cookies_path
 
