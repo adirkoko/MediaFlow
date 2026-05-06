@@ -139,6 +139,10 @@ class YouTubeProcessor:
             "fragment_retries": settings.ytdlp_fragment_retries,
             "extractor_retries": settings.ytdlp_extractor_retries,
             "ffmpeg_location": str(ffmpeg_bin),
+
+            # YouTube currently requires JS challenge solving for some formats.
+            "js_runtimes": {"node": "/usr/bin/node"},
+            "remote_components": {"ejs": "github"},
         }
 
         if cookies_path:

@@ -45,6 +45,7 @@ This repository is intentionally **not** an enterprise platform. It is a lightwe
 - SQLite (jobs + usage events)
 - yt-dlp (download/extract)
 - FFmpeg (merge/convert/embed)
+- Node.js (used by yt-dlp for YouTube JavaScript challenge solving)
 
 ---
 
@@ -121,7 +122,24 @@ sudo apt update
 sudo apt install ffmpeg
 ```
 
-### 3) Git
+### 3) Node.js
+
+Node.js is used by yt-dlp to solve YouTube JavaScript challenges required by some media formats.
+
+#### Windows
+Install Node.js and ensure `node` is available on your PATH.
+
+#### Linux (Debian/Ubuntu)
+```bash
+sudo apt update
+sudo apt install nodejs
+```
+
+#### Docker
+
+The backend Docker image installs Node.js automatically.
+
+### 4) Git
 Install Git to clone/push to GitHub.
 
 ---
@@ -419,6 +437,8 @@ A background cleanup task periodically deletes old job folders based on:
 
 Some content may require authentication (private/unlisted/age-gated content or personal access).
 
+For YouTube, cookies may need to be refreshed periodically because browser sessions can expire or be rotated. Export cookies in Netscape `cookies.txt` format from a browser where you are legitimately signed in.
+
 You may provide a cookies file path via `.env`:
 
 ```env
@@ -448,6 +468,23 @@ Security notes:
 ### Too many retry attempts on download errors
 - `MAX_ATTEMPTS` controls the worker retry count.
 - `YTDLP_RETRIES`, `YTDLP_FRAGMENT_RETRIES`, and `YTDLP_EXTRACTOR_RETRIES` control yt-dlp internal retries.
+
+### YouTube download fails with 403, empty file, or n challenge errors
+
+YouTube may require yt-dlp to solve JavaScript challenges before media URLs can be downloaded.
+
+Ensure:
+- Node.js is installed and available as `node`.
+- yt-dlp is up to date.
+- If using authenticated access, `COOKIES_FILE` points to a valid Netscape-format `cookies.txt`.
+- Cookies are refreshed if yt-dlp reports that account cookies are no longer valid.
+
+In Docker production, rebuild the backend image after dependency changes:
+
+```bash
+docker compose build --no-cache backend
+docker compose up -d
+```
 
 ### Job succeeded but download fails
 - Check `output_filename`/`output_type` in `GET /jobs/{job_id}`.
