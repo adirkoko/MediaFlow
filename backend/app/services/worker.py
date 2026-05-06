@@ -9,7 +9,7 @@ from app.infrastructure.jobs_store import JobsStore
 from app.infrastructure.usage_store import UsageStore
 from app.services.backoff import BackoffConfig, run_with_backoff
 from app.services.cookies import prepare_job_cookies
-from app.services.error_codes import classify_error
+from app.services.error_codes import classify_error, is_retryable_error
 from app.services.job_logging import JobLogger
 from app.services.job_manager import JobManager
 from app.services.youtube_processor import YouTubeProcessor
@@ -130,7 +130,7 @@ class Worker:
                     lambda: run_with_backoff(
                         _run,
                         cfg,
-                        should_retry=lambda exc: not isinstance(exc, JobCanceled),
+                        should_retry=is_retryable_error,
                     )
                 )
 

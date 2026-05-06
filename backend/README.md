@@ -16,12 +16,15 @@ This repository is intentionally **not** an enterprise platform. It is a lightwe
 - **Authenticated access** (username/password -> JWT Bearer token).
 - **Jobs API** for single videos or playlists:
   - Audio or video output
-  - Quality selection (e.g., `best`, `720p`, `1080p`)
+  - Video quality selection (`best`, `144p`, `240p`, `360p`, `480p`, `720p`, `1080p`, `1440p`, `2160p`)
+  - Audio always uses best available audio and therefore accepts only `quality=best`
   - Live progress includes ETA and speed (eta_seconds, speed_bps)
 - **MP3 output** for audio (via FFmpeg).
 - **Metadata embedding** (tags + cover art) for audio/video (where supported by container/player).
+- **YouTube URL allowlist**: job URLs must be YouTube / YouTube Music / youtu.be URLs.
 - **Playlist support**:
   - Processes item-by-item (continues even if some items fail)
+  - Counts an item as successful only when an output file for that specific item was produced
   - Produces `result.zip` with all successfully downloaded items
   - Generates `report.json` with per-item failures and reasons
   - Playlist summary fields: `playlist_total`, `playlist_succeeded`, `playlist_failed` (available via job status APIs)
@@ -254,6 +257,8 @@ Common settings:
 | `YTDLP_RETRIES` | `0` | yt-dlp retry attempts (network/HTTP) |
 | `YTDLP_FRAGMENT_RETRIES` | `0` | yt-dlp retry attempts for fragments |
 | `YTDLP_EXTRACTOR_RETRIES` | `0` | yt-dlp retry attempts for extractor |
+| `NODE_PATH` | *(empty)* | Optional explicit path to the `node` executable. Docker sets this to `/usr/bin/node`; leave empty locally to use `node` from `PATH`. |
+| `YTDLP_REMOTE_COMPONENTS` | *(empty)* | Optional comma-separated yt-dlp remote components. Use `ejs:github` when YouTube requires the newer challenge solver; `true` is accepted as an alias for `ejs:github`. |
 | `COOKIES_FILE` | *(empty)* | Optional absolute path to cookies.txt (see below) |
 
 ---
@@ -296,6 +301,16 @@ Bearer <access_token>
 
 ### Usage
 - `GET /me/usage` -- basic per-user usage summary
+
+---
+
+## URL, Mode, and Quality Rules
+
+- URLs are limited to YouTube hosts (`youtube.com`, subdomains such as `music.youtube.com`, `youtube-nocookie.com`, and `youtu.be`).
+- `mode` must be either `audio` or `video`.
+- `audio` supports only `quality=best`; the service always downloads the best available audio and converts it to MP3.
+- `video` supports: `best`, `144p`, `240p`, `360p`, `480p`, `720p`, `1080p`, `1440p`, `2160p`.
+- Numeric video values such as `720` are normalized to `720p`; unsupported values such as `banana` or `999p` are rejected.
 
 ---
 
@@ -402,8 +417,8 @@ When enabled (`EMBED_METADATA=true`, `EMBED_THUMBNAIL=true`):
 - Audio output (MP3) will include tags and embedded cover image (where supported by your media player).
 - Video output may include metadata and embedded thumbnail depending on container and player.
 
-- **Filenames**: Output filenames are based on the YouTube title with Windows-safe sanitization.
-- **Title Parsing**: For some content, the system attempts to intelligently split "Artist - Title" to improve metadata accuracy.
+- **Filenames**: Output filenames prefer `Artist - Title` when yt-dlp provides music metadata, then fall back to the readable YouTube title with Windows-safe sanitization.
+- **Title Parsing**: For some single-video content, the system attempts to split "Artist - Title" to improve metadata accuracy. This is best-effort only: if lightweight probing cannot provide enough metadata, the job continues with `split_title=false` instead of failing before download.
 
 ---
 
@@ -471,6 +486,7 @@ Security notes:
 ### Too many retry attempts on download errors
 - `MAX_ATTEMPTS` controls the worker retry count.
 - `YTDLP_RETRIES`, `YTDLP_FRAGMENT_RETRIES`, and `YTDLP_EXTRACTOR_RETRIES` control yt-dlp internal retries.
+- The worker does not retry permanent errors such as unsupported URLs, invalid mode/quality, unavailable/private/age-restricted videos, missing cookies/auth, copyright blocks, and unavailable requested formats.
 
 ### YouTube download fails with 403, empty file, format unavailable, or n challenge errors
 
@@ -479,8 +495,8 @@ YouTube may require yt-dlp to solve JavaScript challenges before media URLs can 
 Ensure:
 - Node.js is installed and available as `node`.
 - yt-dlp is up to date.
-- The backend enables yt-dlp JavaScript challenge support with Node.js.
-- Remote EJS components are enabled for yt-dlp when required by YouTube.
+- The backend enables yt-dlp JavaScript challenge support with Node.js. In Docker, `NODE_PATH=/usr/bin/node` is set by default.
+- If yt-dlp warns that the local EJS solver is outdated or skipped, enable remote solver components with `YTDLP_REMOTE_COMPONENTS=ejs:github` (or `YTDLP_REMOTE_COMPONENTS=true`).
 - If using authenticated access, `COOKIES_FILE` points to a valid Netscape-format `cookies.txt`.
 - Cookies are refreshed if yt-dlp reports that account cookies are no longer valid.
 
@@ -502,6 +518,7 @@ docker compose up -d
 ### Playlist partially succeeded
 - The `result.zip` contains only the successful items.
 - Check `report.json` (inside the ZIP or via the `/report` endpoint) to see which items failed and why.
+- Each playlist item is selected by its item-specific filename prefix, so a later item cannot be counted as successful by accidentally reusing a file from an earlier item.
 
 ---
 

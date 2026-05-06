@@ -35,5 +35,5 @@ urllib3==2.6.3
 uvicorn==0.40.0
 watchfiles==1.1.1
 websockets==16.0
-yt-dlp==2025.12.8
-yt-dlp-ejs==0.3.2
+yt-dlp>=2025.12.01
+yt-dlp-ejs==0.8.0

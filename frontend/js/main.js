@@ -224,6 +224,8 @@ async function selectJob(jobId) {
 
 async function downloadOutput() {
   if (!selectedJobId) return;
+  const job = await api(`/jobs/${selectedJobId}`);
+  const filename = job?.output_filename || null;
   const res = await fetch(`${API_BASE}/jobs/${selectedJobId}/download`, {
     headers: authHeaders(),
   });
@@ -235,12 +237,30 @@ async function downloadOutput() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `job-${selectedJobId}`;
+  a.download =
+    filename || filenameFromContentDisposition(res) || `download-${selectedJobId}`;
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
   showToast("Download started");
+}
+
+function filenameFromContentDisposition(res) {
+  const header = res.headers.get("Content-Disposition");
+  if (!header) return null;
+
+  const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim().replace(/^"|"$/g, ""));
+    } catch {
+      return utf8Match[1].trim().replace(/^"|"$/g, "");
+    }
+  }
+
+  const asciiMatch = header.match(/filename="?([^";]+)"?/i);
+  return asciiMatch ? asciiMatch[1].trim() : null;
 }
 
 async function downloadReport() {

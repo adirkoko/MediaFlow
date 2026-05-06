@@ -21,6 +21,10 @@ cp .env.production.example .env
 - `MEDIAFLOW_CORS_ORIGINS`
 - `HOST_MEDIAFLOW_DATA_ROOT`
 
+Optional download-processing settings include:
+- `MEDIAFLOW_NODE_PATH` to point yt-dlp at a custom `node` executable. Leave empty to use `node` from `PATH`.
+- `MEDIAFLOW_YTDLP_REMOTE_COMPONENTS` to opt in to remote yt-dlp components such as `ejs:github`; `true` is accepted as an alias for `ejs:github`.
+
 3. Start stack:
 ```bash
 docker compose --env-file .env up -d --build

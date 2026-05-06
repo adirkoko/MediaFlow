@@ -1,3 +1,5 @@
+FROM node:22-bookworm-slim AS node-runtime
+
 FROM python:3.11-slim
 
 # ------------------------------------------------------------
@@ -8,6 +10,11 @@ RUN apt-get update && \
     ffmpeg \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# yt-dlp requires a supported JavaScript runtime for YouTube challenges.
+# Keep Node explicit and modern instead of relying on Debian's nodejs package.
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+RUN ln -sf /usr/local/bin/node /usr/bin/node
 
 # ------------------------------------------------------------
 # Environment configuration

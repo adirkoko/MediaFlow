@@ -1,6 +1,8 @@
 # backend/app/models/schemas.py
 from enum import Enum
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from app.services.download_validation import validate_download_request
 
 
 class LoginRequest(BaseModel):
@@ -34,6 +36,17 @@ class CreateJobRequest(BaseModel):
     url: str = Field(min_length=5)
     mode: MediaMode
     quality: str = Field(default="best", min_length=1)
+
+    @model_validator(mode="after")
+    def validate_download_options(self) -> "CreateJobRequest":
+        opts = validate_download_request(
+            url=self.url,
+            mode=self.mode.value,
+            quality=self.quality,
+        )
+        self.url = opts.url
+        self.quality = opts.quality
+        return self
 
 
 class CreateJobResponse(BaseModel):

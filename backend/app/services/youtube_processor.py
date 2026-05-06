@@ -4,8 +4,11 @@ import yt_dlp
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
+from urllib.parse import parse_qs, urlparse
+from yt_dlp.utils import sanitize_filename
 
 from app.core.config import settings
+from app.services.download_validation import validate_download_request
 from app.services.packaging import OutputPackager
 from app.services.reporting import ReportWriter, PlaylistReport, PlaylistFailure
 from app.core.exceptions import AllPlaylistItemsFailed, JobCanceled
@@ -22,23 +25,9 @@ class ProcessResult:
     playlist_failed: Optional[int] = None
 
 
-def _parse_quality_to_height(quality: str) -> Optional[int]:
-    """
-    Accepts values like: "best", "720p", "1080", "480p".
-    Returns height (int) or None (for best).
-    """
-    q = quality.strip().lower().replace("p", "")
-    if q == "best":
-        return None
-    if q.isdigit():
-        return int(q)
-    return None
-
-
 class YouTubeProcessor:
     def __init__(self) -> None:
         # Packaging (zip + output selection) is delegated to a focused helper.
-        self._packager = OutputPackager()
         self._packager = OutputPackager()
         self._reporter = ReportWriter()
 
@@ -55,22 +44,26 @@ class YouTubeProcessor:
         should_cancel: Callable[[], bool] | None = None,
     ) -> ProcessResult:
         self._ensure_not_canceled(should_cancel)
+        request = validate_download_request(url=url, mode=mode, quality=quality)
+        url = request.url
+        mode = request.mode
+        quality = request.quality
+        height = request.height
+
         out_dir = Path(settings.outputs_dir) / job_id
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1) Safe detect: avoid processing playlist entries during probing
-        probe_opts = {"quiet": True, "no_warnings": True, **self._youtube_runtime_opts()}
-        if cookies_path:
-            probe_opts["cookiefile"] = cookies_path
-
-        with yt_dlp.YoutubeDL(probe_opts) as ydl:
-            self._ensure_not_canceled(should_cancel)
-            info = ydl.extract_info(url, download=False, process=False)
-
+        # Lightweight detection only. If a single-video probe fails, the real download
+        # still gets a chance to run; playlist URLs require entry extraction.
+        info = self._safe_probe_info(
+            url=url,
+            cookies_path=cookies_path,
+            should_cancel=should_cancel,
+            required=self._looks_like_playlist_url(url),
+        )
         is_playlist = bool(
             info and (info.get("_type") == "playlist" or info.get("entries"))
         )
-        height = _parse_quality_to_height(quality)
 
         # 2) Playlist path: process item-by-item and return ZIP (do NOT call _download_audio/_download_video)
         if is_playlist:
@@ -86,12 +79,9 @@ class YouTubeProcessor:
                 should_cancel=should_cancel,
             )
 
-        # Single item path: now we can extract full info (safe to decide split_title)
-        with yt_dlp.YoutubeDL(probe_opts) as ydl:
-            self._ensure_not_canceled(should_cancel)
-            full_info = ydl.extract_info(url, download=False)
-
-        split_title = self._should_split_title(full_info or {}, url, is_playlist=False)
+        # Metadata/title parsing is best-effort. Never perform a full extract_info
+        # just to improve tags, because that can fail before the actual download.
+        split_title = self._should_split_title(info or {}, url, is_playlist=False)
 
         if mode == "audio":
             return self._download_audio(
@@ -158,13 +148,59 @@ class YouTubeProcessor:
 
         return opts
 
+    def _probe_opts(self, cookies_path: str | None) -> dict:
+        opts = {"quiet": True, "no_warnings": True, **self._youtube_runtime_opts()}
+        if cookies_path:
+            opts["cookiefile"] = cookies_path
+        return opts
+
+    def _safe_probe_info(
+        self,
+        url: str,
+        cookies_path: str | None,
+        should_cancel: Callable[[], bool] | None,
+        required: bool,
+    ) -> dict | None:
+        try:
+            with yt_dlp.YoutubeDL(self._probe_opts(cookies_path)) as ydl:
+                self._ensure_not_canceled(should_cancel)
+                return ydl.extract_info(url, download=False, process=False)
+        except Exception:
+            self._ensure_not_canceled(should_cancel)
+            if required:
+                raise
+            return None
+
+    def _looks_like_playlist_url(self, url: str) -> bool:
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+        return bool(query.get("list"))
+
     def _youtube_runtime_opts(self) -> dict:
-        return {
-            "js_runtimes": {
-                "node": {"path": "/usr/bin/node"},
-            },
-            "remote_components": ["ejs:github"],
-        }
+        node_opts: dict = {}
+        if settings.node_path:
+            node_opts["path"] = settings.node_path
+
+        opts: dict = {"js_runtimes": {"node": node_opts}}
+
+        remote_components = self._remote_components()
+        if remote_components:
+            opts["remote_components"] = remote_components
+
+        return opts
+
+    def _remote_components(self) -> list[str]:
+        raw = (settings.ytdlp_remote_components or "").strip()
+        if not raw:
+            return []
+
+        lowered = raw.lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return ["ejs:github"]
+        if lowered in {"0", "false", "no", "off"}:
+            return []
+
+        return [c.strip() for c in raw.split(",") if c.strip()]
 
     def _ensure_not_canceled(self, should_cancel: Callable[[], bool] | None) -> None:
         if should_cancel and should_cancel():
@@ -173,11 +209,7 @@ class YouTubeProcessor:
     def _extract_playlist_entries(
         self, url: str, cookies_path: str | None
     ) -> tuple[str, list[dict]]:
-        probe_opts = {"quiet": True, "no_warnings": True, **self._youtube_runtime_opts()}
-        if cookies_path:
-            probe_opts["cookiefile"] = cookies_path
-
-        with yt_dlp.YoutubeDL(probe_opts) as ydl:
+        with yt_dlp.YoutubeDL(self._probe_opts(cookies_path)) as ydl:
             info = ydl.extract_info(url, download=False, process=False)
 
         title = info.get("title") or "playlist"
@@ -205,10 +237,12 @@ class YouTubeProcessor:
         # yt-dlp decides naming per-item.
         outtmpl = str(out_dir / "%(title).200s.%(ext)s")
         noplaylist = not is_playlist
+        captured_info: dict = {}
 
         hook = self._build_progress_hook(
             progress_cb, is_playlist=is_playlist, should_cancel=should_cancel
         )
+        hook = self._capture_info_hook(hook, captured_info)
         opts = self._common_opts(
             outtmpl=outtmpl,
             noplaylist=noplaylist,
@@ -259,11 +293,12 @@ class YouTubeProcessor:
 
         # Single-file output: pick the first produced MP3.
         sel = self._packager.pick_first(out_dir, exts={".mp3"})
+        output_path = self._rename_media_output(sel.path, captured_info)
 
         if progress_cb:
             progress_cb(100, "done", 0, 0)
 
-        return ProcessResult(output_path=sel.path, output_type="mp3", is_playlist=False)
+        return ProcessResult(output_path=output_path, output_type="mp3", is_playlist=False)
 
     def _download_video(
         self,
@@ -281,16 +316,14 @@ class YouTubeProcessor:
         self._ensure_not_canceled(should_cancel)
         outtmpl = str(out_dir / "%(title).200s.%(ext)s")
         noplaylist = not is_playlist
+        captured_info: dict = {}
 
-        # yt-dlp canonical selection: bv*+ba/b; we constrain height if requested.
-        if height:
-            fmt = f"bv*[height<={height}]+ba/b[height<={height}]"
-        else:
-            fmt = "bv*+ba/b"
+        fmt = self._video_format_selector(height)
 
         hook = self._build_progress_hook(
             progress_cb, is_playlist=is_playlist, should_cancel=should_cancel
         )
+        hook = self._capture_info_hook(hook, captured_info)
         opts = self._common_opts(
             outtmpl=outtmpl,
             noplaylist=noplaylist,
@@ -337,12 +370,15 @@ class YouTubeProcessor:
 
         # Single-file output: pick the first produced video file.
         sel = self._packager.pick_first(out_dir, exts={".mp4", ".mkv", ".webm"})
+        output_path = self._rename_media_output(sel.path, captured_info)
 
         if progress_cb:
             progress_cb(100, "done", 0, 0)
 
         return ProcessResult(
-            output_path=sel.path, output_type=sel.output_type, is_playlist=False
+            output_path=output_path,
+            output_type=output_path.suffix.lower().lstrip("."),
+            is_playlist=False,
         )
 
     def _metadata_postprocessors(self) -> list[dict]:
@@ -357,6 +393,85 @@ class YouTubeProcessor:
             pps.append({"key": "EmbedThumbnail"})
 
         return pps
+
+    def _video_format_selector(self, height: Optional[int]) -> str:
+        if height:
+            height_filter = f"[height<={height}]"
+            return (
+                f"bv*[ext=mp4]{height_filter}+ba[ext=m4a]/"
+                f"b[ext=mp4]{height_filter}/"
+                f"bv*{height_filter}+ba/b{height_filter}"
+            )
+
+        return "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b"
+
+    def _capture_info_hook(self, hook, captured_info: dict):
+        def wrapped(d: dict):
+            hook(d)
+            info = d.get("info_dict")
+            if isinstance(info, dict):
+                captured_info.update(info)
+
+        return wrapped
+
+    def _preferred_media_stem(self, info: dict) -> str | None:
+        artist = self._first_text(
+            info.get("artist"),
+            info.get("album_artist"),
+            info.get("creator"),
+            info.get("uploader"),
+            info.get("channel"),
+        )
+        title = self._first_text(info.get("track"), info.get("title"))
+
+        artists = info.get("artists")
+        if not artist and isinstance(artists, list):
+            artist = ", ".join(str(a).strip() for a in artists if str(a).strip())
+
+        if artist and title:
+            if " - " in title or title.lower().startswith(artist.lower()):
+                return title
+            return f"{artist} - {title}"
+        return title
+
+    def _first_text(self, *values) -> str | None:
+        for value in values:
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+
+    def _rename_media_output(
+        self,
+        path: Path,
+        info: dict,
+        prefix: str = "",
+    ) -> Path:
+        stem = self._preferred_media_stem(info)
+        if not stem:
+            return path
+
+        safe_stem = sanitize_filename(stem, restricted=False, is_id=False).strip()
+        if not safe_stem:
+            return path
+
+        safe_stem = safe_stem[:200]
+        desired = path.with_name(f"{prefix}{safe_stem}{path.suffix}")
+        if desired == path:
+            return path
+
+        return self._unique_rename(path, desired)
+
+    def _unique_rename(self, src: Path, desired: Path) -> Path:
+        candidate = desired
+        counter = 2
+        while candidate.exists() and candidate != src:
+            candidate = desired.with_name(
+                f"{desired.stem} ({counter}){desired.suffix}"
+            )
+            counter += 1
+
+        src.rename(candidate)
+        return candidate
 
     def _should_split_title(self, info: dict, url: str, is_playlist: bool) -> bool:
         # Conservative: never split titles inside playlists (avoid mixed-content issues).
@@ -506,9 +621,11 @@ class YouTubeProcessor:
     ):
         self._ensure_not_canceled(should_cancel)
         outtmpl = str(out_dir / f"{prefix}%(title).200s.%(ext)s")
+        captured_info: dict = {}
         hook = self._build_item_progress_hook(
             progress_cb, idx, total, should_cancel=should_cancel
         )
+        hook = self._capture_info_hook(hook, captured_info)
         opts = self._common_opts(
             outtmpl=outtmpl,
             noplaylist=True,
@@ -540,10 +657,13 @@ class YouTubeProcessor:
         # pick the produced mp3 for this prefix
         candidates = sorted(out_dir.glob(f"{prefix}*.mp3"))
         if candidates:
-            return candidates[0]
+            return self._rename_media_output(
+                candidates[0],
+                captured_info,
+                prefix=prefix,
+            )
 
-        # fallback (rare)
-        return self._packager.pick_first(out_dir, exts={".mp3"}).path
+        raise RuntimeError(f"No audio output produced for playlist item {idx}/{total}")
 
     def _download_one_video(
         self,
@@ -559,9 +679,11 @@ class YouTubeProcessor:
     ):
         self._ensure_not_canceled(should_cancel)
         outtmpl = str(out_dir / f"{prefix}%(title).200s.%(ext)s")
+        captured_info: dict = {}
         hook = self._build_item_progress_hook(
             progress_cb, idx, total, should_cancel=should_cancel
         )
+        hook = self._capture_info_hook(hook, captured_info)
         opts = self._common_opts(
             outtmpl=outtmpl,
             noplaylist=True,
@@ -569,10 +691,7 @@ class YouTubeProcessor:
             progress_hook=hook,
         )
 
-        if height:
-            fmt = f"bv*[height<={height}]+ba/b[height<={height}]"
-        else:
-            fmt = "bv*+ba/b"
+        fmt = self._video_format_selector(height)
 
         opts["parse_metadata"] = self._parse_metadata_rules(split_title=False)
         opts.update(
@@ -590,15 +709,15 @@ class YouTubeProcessor:
         # prefer mp4
         mp4 = sorted(out_dir.glob(f"{prefix}*.mp4"))
         if mp4:
-            return mp4[0]
+            return self._rename_media_output(mp4[0], captured_info, prefix=prefix)
 
         # fallback containers
         for ext in ("mkv", "webm"):
             c = sorted(out_dir.glob(f"{prefix}*.{ext}"))
             if c:
-                return c[0]
+                return self._rename_media_output(c[0], captured_info, prefix=prefix)
 
-        return self._packager.pick_first(out_dir, exts={".mp4", ".mkv", ".webm"}).path
+        raise RuntimeError(f"No video output produced for playlist item {idx}/{total}")
 
     def _process_playlist(
         self,
@@ -665,7 +784,7 @@ class YouTubeProcessor:
                         should_cancel=should_cancel,
                     )
                     success_files.append(p)
-                else:
+                elif mode == "video":
                     p = self._download_one_video(
                         item_url=item_url,
                         out_dir=out_dir,
@@ -678,6 +797,8 @@ class YouTubeProcessor:
                         should_cancel=should_cancel,
                     )
                     success_files.append(p)
+                else:
+                    raise ValueError("Unsupported mode. Supported modes: audio, video")
 
             except Exception as ex:
                 if isinstance(ex, JobCanceled):

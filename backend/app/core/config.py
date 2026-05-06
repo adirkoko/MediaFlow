@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     ytdlp_retries: int = 0
     ytdlp_fragment_retries: int = 0
     ytdlp_extractor_retries: int = 0
+    node_path: str | None = None
+    ytdlp_remote_components: str | None = None
 
     # Optional cookies (for legit authenticated access)
     cookies_file: str | None = None  # set in .env as an absolute path
@@ -55,6 +57,18 @@ class Settings(BaseSettings):
     @classmethod
     def parse_outputs_ttl_minutes(cls, value: object) -> object:
         # Allow empty env value (e.g. OUTPUTS_TTL_MINUTES=) to behave like "not set".
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return value
+
+    @field_validator(
+        "cookies_file",
+        "node_path",
+        "ytdlp_remote_components",
+        mode="before",
+    )
+    @classmethod
+    def parse_optional_strings(cls, value: object) -> object:
         if isinstance(value, str) and value.strip() == "":
             return None
         return value
