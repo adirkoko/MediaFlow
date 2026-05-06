@@ -122,6 +122,9 @@ sudo apt update
 sudo apt install ffmpeg
 ```
 
+#### Docker
+The backend Docker image installs FFmpeg automatically. In Docker/Linux, `ffmpeg` and `ffprobe` are expected to be available on `PATH`.
+
 ### 3) Node.js
 
 Node.js is used by yt-dlp to solve YouTube JavaScript challenges required by some media formats.
@@ -456,8 +459,8 @@ Security notes:
 ## Troubleshooting
 
 ### FFmpeg not found
-- Windows: ensure `backend/bin/ffmpeg.exe` exists.
-- Linux: ensure `ffmpeg` is installed and on PATH.
+- Windows: ensure `backend/bin/ffmpeg.exe` exists, or install FFmpeg globally and ensure it is on `PATH`.
+- Linux/Docker: ensure both `ffmpeg` and `ffprobe` are installed and available on `PATH`.
 
 ### 401 Unauthorized
 - Login again and ensure you send `Authorization: Bearer <token>`.

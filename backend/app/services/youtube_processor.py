@@ -138,9 +138,11 @@ class YouTubeProcessor:
             "retries": settings.ytdlp_retries,
             "fragment_retries": settings.ytdlp_fragment_retries,
             "extractor_retries": settings.ytdlp_extractor_retries,
-            "ffmpeg_location": str(ffmpeg_bin),
             **self._youtube_runtime_opts(),
         }
+
+        if ffmpeg_bin.exists():
+            opts["ffmpeg_location"] = str(ffmpeg_bin)
 
         if cookies_path:
             # Optional: authenticated access (age-gated/private/unlisted where applicable).
