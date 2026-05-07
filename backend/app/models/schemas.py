@@ -2,7 +2,7 @@
 from enum import Enum
 from pydantic import BaseModel, Field, model_validator
 
-from app.services.download_validation import validate_download_request
+from app.services.download_validation import validate_download_request, validate_youtube_url
 
 
 class LoginRequest(BaseModel):
@@ -47,6 +47,39 @@ class CreateJobRequest(BaseModel):
         self.url = opts.url
         self.quality = opts.quality
         return self
+
+
+class PreviewRequest(BaseModel):
+    url: str = Field(min_length=5)
+
+    @model_validator(mode="after")
+    def validate_url(self) -> "PreviewRequest":
+        self.url = validate_youtube_url(self.url)
+        return self
+
+
+class VideoQualityPreviewResponse(BaseModel):
+    quality: str
+    height: int | None = None
+    ext: str | None = None
+    filesize_bytes: int | None = None
+    fps: float | None = None
+    vcodec: str | None = None
+    acodec: str | None = None
+
+
+class PreviewResponse(BaseModel):
+    url: str
+    webpage_url: str | None = None
+    title: str
+    thumbnail: str | None = None
+    uploader: str | None = None
+    duration_seconds: int | None = None
+    is_playlist: bool
+    playlist_count: int | None = None
+    audio_ext: str | None = None
+    audio_filesize_bytes: int | None = None
+    video_qualities: list[VideoQualityPreviewResponse] = Field(default_factory=list)
 
 
 class CreateJobResponse(BaseModel):

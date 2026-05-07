@@ -2,7 +2,7 @@
 
 MediaFlow includes:
 - `backend/`: FastAPI service for auth, jobs, download processing, and usage tracking.
-- `frontend/`: static web UI (served by nginx in Docker).
+- `frontend/`: static one-page web UI (served by nginx in Docker) with URL preview, format selection, live job status, and recent downloads.
 
 For production on Ubuntu, this repo is designed to run with a single compose stack:
 - [docker-compose.yml](./docker-compose.yml)

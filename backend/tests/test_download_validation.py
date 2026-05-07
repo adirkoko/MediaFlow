@@ -1,6 +1,6 @@
 import unittest
 
-from app.services.download_validation import validate_download_request
+from app.services.download_validation import validate_download_request, validate_youtube_url
 
 
 class DownloadValidationTests(unittest.TestCase):
@@ -46,6 +46,15 @@ class DownloadValidationTests(unittest.TestCase):
                 mode="video",
                 quality="best",
             )
+
+    def test_preview_url_validation_reuses_youtube_allowlist(self):
+        self.assertEqual(
+            validate_youtube_url(" https://music.youtube.com/watch?v=dQw4w9WgXcQ "),
+            "https://music.youtube.com/watch?v=dQw4w9WgXcQ",
+        )
+
+        with self.assertRaisesRegex(ValueError, "Only YouTube URLs"):
+            validate_youtube_url("https://vimeo.com/123")
 
     def test_rejects_unknown_mode(self):
         with self.assertRaisesRegex(ValueError, "Unsupported mode"):

@@ -36,14 +36,12 @@ def normalize_quality(quality: str) -> str:
 
 
 def validate_download_request(url: str, mode: str, quality: str) -> DownloadOptions:
-    clean_url = url.strip()
+    clean_url = validate_youtube_url(url)
     clean_mode = mode.strip().lower()
     clean_quality = normalize_quality(quality)
 
     if clean_mode not in SUPPORTED_MODES:
         raise ValueError("Unsupported mode. Supported modes: audio, video")
-
-    _validate_youtube_url(clean_url)
 
     if clean_mode == "audio":
         if clean_quality not in SUPPORTED_AUDIO_QUALITIES:
@@ -66,6 +64,12 @@ def validate_download_request(url: str, mode: str, quality: str) -> DownloadOpti
         quality=clean_quality,
         height=height,
     )
+
+
+def validate_youtube_url(url: str) -> str:
+    clean_url = url.strip()
+    _validate_youtube_url(clean_url)
+    return clean_url
 
 
 def _validate_youtube_url(url: str) -> None:

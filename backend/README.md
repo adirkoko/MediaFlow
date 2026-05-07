@@ -15,6 +15,7 @@ This repository is intentionally **not** an enterprise platform. It is a lightwe
 
 - **Authenticated access** (username/password -> JWT Bearer token).
 - **Jobs API** for single videos or playlists:
+  - Preview endpoint before job creation (title, thumbnail, playlist/video basics, available video qualities when yt-dlp can resolve them)
   - Audio or video output
   - Video quality selection (`best`, `144p`, `240p`, `360p`, `480p`, `720p`, `1080p`, `1440p`, `2160p`)
   - Audio always uses best available audio and therefore accepts only `quality=best`
@@ -82,6 +83,7 @@ backend/
       error_codes.py
       job_logging.py
       job_manager.py
+      media_preview.py
       packaging.py
       reporting.py
       worker.py
@@ -291,6 +293,7 @@ Bearer <access_token>
 - `GET /health`
 
 ### Jobs
+- `POST /jobs/preview` -- inspect a YouTube URL before creating a job
 - `POST /jobs` -- create job (audio/video, quality, url)
 - `POST /jobs/{job_id}/cancel` -- request cancellation (`queued` cancels immediately, `running` cancels cooperatively)
 - `GET /jobs` -- list last jobs for current user (default 50)
@@ -316,7 +319,33 @@ Bearer <access_token>
 
 ## Jobs Workflow
 
-1) Create a job:
+1) Preview a URL:
+```bash
+curl -X POST "http://127.0.0.1:8000/jobs/preview" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"url\":\"https://www.youtube.com/watch?v=dQw4w9WgXcQ\"}"
+```
+
+Response:
+```json
+{
+  "title": "Example title",
+  "thumbnail": "https://...",
+  "is_playlist": false,
+  "duration_seconds": 213,
+  "audio_ext": "m4a",
+  "audio_filesize_bytes": 3456789,
+  "video_qualities": [
+    {"quality": "best", "height": 1080, "ext": "mp4", "filesize_bytes": 12345678},
+    {"quality": "720p", "height": 720, "ext": "mp4", "filesize_bytes": 7654321}
+  ]
+}
+```
+
+Preview uses the same YouTube URL allowlist as job creation. File sizes and video qualities are best-effort; playlists may expose less exact format data until each item is processed.
+
+2) Create a job:
 ```bash
 curl -X POST "http://127.0.0.1:8000/jobs" \
   -H "Authorization: Bearer $TOKEN" \
@@ -333,7 +362,7 @@ Response:
 }
 ```
 
-2) Poll status:
+3) Poll status:
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
   "http://127.0.0.1:8000/jobs/<job_id>"
@@ -352,7 +381,7 @@ Response (for playlists):
 }
 ```
 
-3) Download when `status == "succeeded"`:
+4) Download when `status == "succeeded"`:
 ```bash
 curl -L -H "Authorization: Bearer $TOKEN" \
   "http://127.0.0.1:8000/jobs/<job_id>/download" \

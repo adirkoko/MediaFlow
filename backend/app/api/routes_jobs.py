@@ -16,7 +16,11 @@ from app.models.schemas import (
     CreateJobResponse,
     CancelJobResponse,
     JobResponse,
+    PreviewRequest,
+    PreviewResponse,
+    VideoQualityPreviewResponse,
 )
+from app.services.media_preview import MediaPreviewer
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -52,6 +56,43 @@ async def create_job(
         await manager.enqueue(job_id)
 
     return CreateJobResponse(job_id=job_id, status="queued", reused=reused)
+
+
+@router.post("/preview", response_model=PreviewResponse)
+async def preview_job(
+    payload: PreviewRequest,
+    username: str = Depends(get_current_username),
+) -> PreviewResponse:
+    _ = username
+    try:
+        preview = await asyncio.to_thread(MediaPreviewer().preview, payload.url)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return PreviewResponse(
+        url=preview.url,
+        webpage_url=preview.webpage_url,
+        title=preview.title,
+        thumbnail=preview.thumbnail,
+        uploader=preview.uploader,
+        duration_seconds=preview.duration_seconds,
+        is_playlist=preview.is_playlist,
+        playlist_count=preview.playlist_count,
+        audio_ext=preview.audio_ext,
+        audio_filesize_bytes=preview.audio_filesize_bytes,
+        video_qualities=[
+            VideoQualityPreviewResponse(
+                quality=q.quality,
+                height=q.height,
+                ext=q.ext,
+                filesize_bytes=q.filesize_bytes,
+                fps=q.fps,
+                vcodec=q.vcodec,
+                acodec=q.acodec,
+            )
+            for q in preview.video_qualities
+        ],
+    )
 
 
 @router.get("/{job_id}", response_model=JobResponse)
