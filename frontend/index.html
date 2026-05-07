@@ -116,6 +116,15 @@
         white-space: nowrap;
       }
 
+      .copy-toast {
+        opacity: 0;
+        transform: translateY(6px);
+      }
+
+      .copy-toast.show {
+        animation: toastFade 1.15s ease forwards;
+      }
+
       .running-mark {
         animation: progressPulse 1.6s ease-in-out infinite;
       }
@@ -142,6 +151,22 @@
         to {
           transform: scale(1);
           opacity: 1;
+        }
+      }
+
+      @keyframes toastFade {
+        0% {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        15%,
+        72% {
+          opacity: 1;
+          transform: translateY(0);
+        }
+        100% {
+          opacity: 0;
+          transform: translateY(-2px);
         }
       }
 
@@ -310,6 +335,13 @@
         </aside>
       </section>
     </main>
+
+    <div
+      id="copy-toast"
+      class="copy-toast pointer-events-none fixed bottom-5 right-5 hidden rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white shadow-lg"
+    >
+      Copied
+    </div>
 
     <script src="./js/runtime-config.js"></script>
     <script src="./js/main.js"></script>

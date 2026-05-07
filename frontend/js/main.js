@@ -43,6 +43,7 @@ const els = {
   jobFacts: document.getElementById("job-facts"),
   jobOutput: document.getElementById("job-output"),
   jobMessage: document.getElementById("job-message"),
+  copyToast: document.getElementById("copy-toast"),
 };
 
 const state = {
@@ -58,6 +59,8 @@ const state = {
   liveJobId: null,
   refreshTimer: null,
   lastRefreshAt: null,
+  jobsRenderKey: "",
+  selectedJobRenderKey: "",
 };
 
 const FALLBACK_VIDEO_QUALITIES = [
@@ -94,52 +97,30 @@ function authHeaders() {
 
 async function api(path, options = {}) {
   const { silent = false, ...fetchOptions } = options;
-  if (!silent) setBusy(true);
+  void silent;
 
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...fetchOptions,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+      ...(fetchOptions.headers || {}),
+    },
+  });
+  const text = await res.text();
+  let data = null;
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
-      ...fetchOptions,
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders(),
-        ...(fetchOptions.headers || {}),
-      },
-    });
-    const text = await res.text();
-    let data = null;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = text;
-    }
-    if (!res.ok) {
-      const detail = Array.isArray(data?.detail)
-        ? data.detail.map((d) => d.msg || String(d)).join(", ")
-        : data?.detail || data || res.statusText;
-      throw new Error(detail);
-    }
-    return data;
-  } finally {
-    if (!silent) setBusy(false);
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
   }
-}
-
-function setBusy(isBusy) {
-  const buttons = [
-    els.btnLogin,
-    els.btnLogout,
-    els.btnPreview,
-    els.btnCreate,
-    els.btnCancel,
-    els.btnDownload,
-    els.btnCopyStats,
-    els.btnRefresh,
-  ];
-  for (const button of buttons) {
-    if (!button) continue;
-    button.classList.toggle("opacity-60", isBusy);
-    button.classList.toggle("cursor-not-allowed", isBusy);
+  if (!res.ok) {
+    const detail = Array.isArray(data?.detail)
+      ? data.detail.map((d) => d.msg || String(d)).join(", ")
+      : data?.detail || data || res.statusText;
+    throw new Error(detail);
   }
+  return data;
 }
 
 function updateApiBadge() {
@@ -390,21 +371,43 @@ async function refreshJobs({ silent = false } = {}) {
   renderRefreshLabel();
 
   if (!state.selectedJobId && state.jobs.length > 0) {
-    await selectJob(state.jobs[0].job_id, { silent: true, noToast: true });
+    await selectJob(state.jobs[0].job_id, { silent: true });
   }
 }
 
-async function selectJob(jobId, { silent = false, noToast = false } = {}) {
+async function selectJob(jobId, { silent = false } = {}) {
+  const isDifferentJob = state.selectedJobId !== jobId;
+  if (isDifferentJob) {
+    clearMessage("job");
+  }
   state.selectedJobId = jobId;
   const job = await api(`/jobs/${jobId}`, { silent });
   state.selectedJob = job;
   renderSelectedJob();
   renderJobs();
-  if (!noToast) setMessage("jobs", `Selected ${shortJobId(jobId)}.`, "info");
   if (isActiveJob(job)) startLive(jobId);
 }
 
 function renderJobs() {
+  const renderKey = JSON.stringify({
+    selected: state.selectedJobId,
+    signedIn: Boolean(getToken()),
+    jobs: state.jobs.map((job) => ({
+      id: job.job_id,
+      status: job.status,
+      mode: job.mode,
+      quality: job.quality,
+      updated_at: job.updated_at,
+      created_at: job.created_at,
+      output_filename: job.output_filename,
+      output_type: job.output_type,
+      error_code: job.error_code,
+      stage: job.stage,
+    })),
+  });
+  if (renderKey === state.jobsRenderKey) return;
+  state.jobsRenderKey = renderKey;
+
   els.jobsList.innerHTML = "";
   if (!getToken()) {
     els.jobsList.innerHTML = `<div class="soft p-4 text-sm text-slate-500">Signed out</div>`;
@@ -441,6 +444,8 @@ function renderJobs() {
 function renderSelectedJob() {
   const job = state.selectedJob;
   if (!job) {
+    if (state.selectedJobRenderKey === "none") return;
+    state.selectedJobRenderKey = "none";
     els.selectedJobLabel.textContent = "No job selected";
     updateLiveProgress({ progress_percent: 0, stage: "idle", status: "idle" });
     els.jobFacts.innerHTML = "";
@@ -452,6 +457,29 @@ function renderSelectedJob() {
     }
     return;
   }
+
+  const renderKey = JSON.stringify({
+    job_id: job.job_id,
+    status: job.status,
+    mode: job.mode,
+    quality: job.quality,
+    created_at: job.created_at,
+    updated_at: job.updated_at,
+    started_at: job.started_at,
+    finished_at: job.finished_at,
+    output_filename: job.output_filename,
+    output_type: job.output_type,
+    error_code: job.error_code,
+    error_message: job.error_message,
+    playlist_total: job.playlist_total,
+    playlist_succeeded: job.playlist_succeeded,
+    playlist_failed: job.playlist_failed,
+  });
+  if (renderKey === state.selectedJobRenderKey) {
+    updateLiveProgress(job);
+    return;
+  }
+  state.selectedJobRenderKey = renderKey;
 
   els.selectedJobLabel.textContent = `${shortJobId(job.job_id)} / ${job.mode} / ${job.quality}`;
   updateLiveProgress(job);
@@ -500,7 +528,7 @@ function renderSelectedJob() {
 async function cancelJob() {
   if (!state.selectedJobId) return;
   const data = await api(`/jobs/${state.selectedJobId}/cancel`, { method: "POST" });
-  await selectJob(state.selectedJobId, { silent: true, noToast: true });
+  await selectJob(state.selectedJobId, { silent: true });
   await refreshJobs({ silent: true });
   setMessage(
     "job",
@@ -563,7 +591,20 @@ async function copyJobStats() {
   } else {
     copyTextFallback(text);
   }
-  setMessage("job", "Job JSON copied.", "success");
+  showCopyToast("Copied");
+}
+
+function showCopyToast(message) {
+  if (!els.copyToast) return;
+  els.copyToast.textContent = message;
+  els.copyToast.classList.remove("hidden", "show");
+  void els.copyToast.offsetWidth;
+  els.copyToast.classList.add("show");
+  window.clearTimeout(showCopyToast.timer);
+  showCopyToast.timer = window.setTimeout(() => {
+    els.copyToast.classList.add("hidden");
+    els.copyToast.classList.remove("show");
+  }, 1200);
 }
 
 function copyTextFallback(text) {
@@ -585,7 +626,9 @@ function startLive(jobId) {
   state.liveJobId = jobId;
   state.liveAbort = new AbortController();
   streamJobEvents(jobId, state.liveAbort.signal).catch((err) => {
-    if (err.name !== "AbortError") setMessage("job", err.message, "error");
+    if (err.name !== "AbortError" && state.selectedJobId === jobId) {
+      setMessage("job", err.message, "error");
+    }
   });
 }
 
@@ -622,7 +665,7 @@ async function streamJobEvents(jobId, signal) {
         }
         if (payload.status && !isActiveStatus(payload.status)) {
           await refreshJobs({ silent: true });
-          await selectJob(jobId, { silent: true, noToast: true });
+          await selectJob(jobId, { silent: true });
         }
       } catch {
         // Ignore malformed chunks.
@@ -668,7 +711,7 @@ function startSmartRefresh() {
       if (hasToken && !hidden) {
         await refreshJobs({ silent: true });
         if (state.selectedJobId) {
-          await selectJob(state.selectedJobId, { silent: true, noToast: true });
+          await selectJob(state.selectedJobId, { silent: true });
         }
       }
     } catch {
