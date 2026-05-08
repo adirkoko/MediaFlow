@@ -62,6 +62,9 @@ python -c "from app.core.security import hash_password; print(hash_password('Cha
 
 ## 6) Start services
 
+The frontend image runs the Vite production build during `docker compose build`
+and nginx serves the generated `dist` output.
+
 ```bash
 cd /srv/services/mediaflow
 docker compose --env-file .env up -d --build

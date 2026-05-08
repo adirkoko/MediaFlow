@@ -6,7 +6,7 @@ set -eu
 
 MEDIAFLOW_PUBLIC_URL="${MEDIAFLOW_PUBLIC_URL%/}"
 
-cat > /usr/share/nginx/html/js/runtime-config.js <<EOF
+cat > /usr/share/nginx/html/runtime-config.js <<EOF
 window.MEDIAFLOW_API_BASE = '${MEDIAFLOW_API_BASE}';
 EOF
 

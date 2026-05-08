@@ -1,3 +1,5 @@
 .run/
 .env
 data/
+frontend/dist/
+frontend/node_modules/
