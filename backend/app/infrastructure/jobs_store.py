@@ -178,6 +178,40 @@ class JobsStore:
             ).fetchall()
             return [JobRecord(**dict(r)) for r in rows]
 
+    def list_jobs_admin(
+        self,
+        user: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[JobRecord]:
+        clauses: list[str] = []
+        args: list[object] = []
+        if user:
+            clauses.append("user = ?")
+            args.append(user)
+        if status:
+            clauses.append("status = ?")
+            args.append(status)
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        safe_limit = max(1, min(int(limit), 500))
+        safe_offset = max(0, int(offset))
+        args.extend([safe_limit, safe_offset])
+
+        with get_conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM jobs
+                {where}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                tuple(args),
+            ).fetchall()
+            return [JobRecord(**dict(r)) for r in rows]
+
     def update_progress(
         self,
         job_id: str,

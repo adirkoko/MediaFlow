@@ -1,14 +1,17 @@
 import { api } from "./api/client.js";
 import { renderJobs, renderSelectedJob, refreshJobs, stopLive } from "./jobs/index.js";
 import { renderPreview } from "./preview.js";
-import { getToken, setToken } from "./session.js";
+import { getCurrentUserFromToken, getToken, setToken } from "./session.js";
 import { state } from "./state.js";
 import { els } from "./ui/elements.js";
 import { clearMessage, setMessage } from "./ui/messages.js";
 
 export function updateTokenStatus() {
   const present = Boolean(getToken());
-  els.tokenPill.textContent = present ? "Signed in" : "Signed out";
+  const user = getCurrentUserFromToken();
+  els.tokenPill.textContent = present
+    ? `Signed in${user?.role === "admin" ? " · admin" : ""}`
+    : "Signed out";
   els.tokenPill.className = present
     ? "rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700"
     : "rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600";

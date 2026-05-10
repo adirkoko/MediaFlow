@@ -1,5 +1,6 @@
 import "./styles/main.css";
 
+import { initAdminRouter } from "./admin/index.js";
 import { login, logout, updateTokenStatus } from "./auth.js";
 import { updateApiBadge } from "./config.js";
 import {
@@ -114,6 +115,7 @@ function init() {
   renderPreview();
   renderJobs();
   renderSelectedJob();
+  initAdminRouter();
   startSmartRefresh();
 }
 

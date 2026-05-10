@@ -10,6 +10,7 @@ The MediaFlow frontend is a Vite-built single-page web UI served by nginx in Doc
 - Live job progress through the backend SSE endpoint.
 - Contextual inline errors for auth, preview, jobs, and the selected job.
 - Copy Job JSON action with a short toast confirmation.
+- Admin dashboard under `/admin` for users, quotas, usage, jobs, security events, and audit logs.
 - Open Graph/Twitter metadata, favicon, home-screen icons, and web manifest assets.
 
 ## Tech Stack
@@ -33,6 +34,9 @@ frontend/
     state.js
     auth.js
     preview.js
+    admin/
+      api.js
+      index.js
     api/
       client.js
     jobs/
@@ -76,6 +80,23 @@ npm run dev
 ```
 
 The dev server runs on `http://127.0.0.1:5173` and proxies `/api/*` to `http://127.0.0.1:8000/*`, so run the backend locally as well.
+
+## Admin Dashboard
+
+Admins can open `/admin` after logging in with a JWT whose payload includes `role="admin"`.
+The frontend uses that role only for client-side routing; backend admin APIs remain the security boundary.
+
+Dashboard routes:
+
+- `/admin` -- operational overview.
+- `/admin/users` and `/admin/users/:userId` -- user management, password reset, token revocation, usage, and quota override editing.
+- `/admin/quotas` -- role quota defaults and a jump point for user overrides.
+- `/admin/usage` -- today/week/month summaries, heavy users, and quota exceeded events.
+- `/admin/jobs` -- all-job inspection and admin cancel for queued/running jobs.
+- `/admin/security` -- login attempts and blocked login windows.
+- `/admin/audit` -- admin/security audit log inspection.
+
+Soft delete, disable, password reset, token revoke, job cancel, and broad role quota updates require confirmation in the UI. Password hashes, JWTs, cookies, and plaintext passwords are not displayed.
 
 ## Production Build
 

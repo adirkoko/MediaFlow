@@ -25,8 +25,16 @@ export async function api(path, options = {}) {
   if (!res.ok) {
     const detail = Array.isArray(data?.detail)
       ? data.detail.map((d) => d.msg || String(d)).join(", ")
-      : data?.detail || data || res.statusText;
+      : formatErrorDetail(data?.detail || data || res.statusText);
     throw new Error(detail);
   }
   return data;
+}
+
+function formatErrorDetail(detail) {
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail === "object") {
+    return detail.message || detail.error || JSON.stringify(detail);
+  }
+  return String(detail);
 }

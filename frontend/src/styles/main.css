@@ -95,6 +95,74 @@ body {
   background: rgba(239, 246, 255, 0.8);
 }
 
+.admin-nav-link {
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  color: rgb(71 85 105);
+  font-size: 0.925rem;
+  font-weight: 600;
+}
+
+.admin-nav-link:hover,
+.admin-nav-link.active {
+  background: rgba(16, 185, 129, 0.12);
+  color: rgb(5 150 105);
+}
+
+.admin-input {
+  height: 2.5rem;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 0 0.75rem;
+  color: rgb(var(--ink));
+  outline: none;
+}
+
+.admin-input:focus {
+  border-color: rgba(16, 185, 129, 0.75);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.admin-table th,
+.admin-table td {
+  border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+  padding: 0.72rem 0.85rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.admin-table th {
+  background: rgba(248, 250, 252, 0.9);
+  color: rgb(71 85 105);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.admin-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.55rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.danger-soft {
+  border-color: rgba(251, 113, 133, 0.45);
+  color: rgb(190 18 60);
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.58;

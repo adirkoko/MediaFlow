@@ -63,6 +63,7 @@ backend/
     main.py
     api/
       routes_admin_quotas.py
+      routes_admin_jobs.py
       routes_admin_security.py
       routes_admin_users.py
       routes_admin_usage.py
@@ -413,6 +414,9 @@ a later upgrade.
 - `GET /admin/usage/users/{user_id}/daily?days=30`
 - `GET /admin/usage/heavy-users?range=today|week|month`
 - `GET /admin/usage/quota-exceeded?range=today|week|month`
+- `GET /admin/jobs`
+- `GET /admin/jobs/{job_id}`
+- `POST /admin/jobs/{job_id}/cancel`
 - `GET /admin/security/login-attempts`
 - `GET /admin/security/blocked-logins`
 - `GET /admin/security/audit-logs`
@@ -464,6 +468,8 @@ Users can inspect their own limits with:
 - `DELETE /admin/users/{user_id}/quota`
 - `GET /admin/usage/summary`
 - `GET /admin/usage/heavy-users`
+- `GET /admin/jobs`
+- `POST /admin/jobs/{job_id}/cancel`
 - `GET /admin/security/login-attempts`
 - `GET /admin/security/audit-logs`
 
@@ -723,8 +729,6 @@ docker compose up -d
 
 ## Roadmap (Optional Ideas)
 - `GET /jobs/{job_id}/log` endpoint (serve job.log safely)
-- Admin user management endpoints (create/delete users via API)
-- Optional frontend UI (Web Dashboard)
 - Expose granular per-item statuses in the jobs API
 - Optional storage backends (S3/local network path)
 

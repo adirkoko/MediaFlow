@@ -1,4 +1,6 @@
 export const els = {
+  userApp: document.getElementById("user-app"),
+  adminRoot: document.getElementById("admin-root"),
   apiBaseLabel: document.getElementById("api-base-label"),
   username: document.getElementById("username"),
   password: document.getElementById("password"),
@@ -6,6 +8,7 @@ export const els = {
   tokenPill: document.getElementById("token-pill"),
   btnLogin: document.getElementById("btn-login"),
   btnLogout: document.getElementById("btn-logout"),
+  adminLink: document.getElementById("admin-link"),
   jobUrl: document.getElementById("job-url"),
   btnPreview: document.getElementById("btn-preview"),
   previewLoading: document.getElementById("preview-loading"),

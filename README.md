@@ -5,7 +5,7 @@ MediaFlow is a small full-stack tool for authorized users to preview YouTube lin
 ## Components
 
 - `backend/`: FastAPI service for auth, admin users, quotas, jobs, download processing, and usage tracking.
-- `frontend/`: Vite-built one-page web UI (served by nginx in Docker) with URL preview, format selection, live job status, and recent downloads.
+- `frontend/`: Vite-built web UI (served by nginx in Docker) with the normal download flow plus an admin dashboard at `/admin`.
 
 ## Documentation
 

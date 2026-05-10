@@ -44,7 +44,7 @@
     <script src="/runtime-config.js"></script>
   </head>
   <body class="min-h-screen bg-[radial-gradient(circle_at_top,_#ffffff,_#e2e8f0_46%,_#e9eff7_72%,_#f8fafc_100%)] text-slate-900">
-    <main class="mx-auto grid min-h-screen max-w-7xl content-start gap-5 px-4 py-4 sm:px-6 lg:px-8 lg:py-7">
+    <main id="user-app" class="mx-auto grid min-h-screen max-w-7xl content-start gap-5 px-4 py-4 sm:px-6 lg:px-8 lg:py-7">
       <header class="panel grid gap-4 p-4 md:grid-cols-[1fr_auto] md:items-center">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-3">
@@ -54,7 +54,7 @@
           </div>
         </div>
 
-        <div class="grid gap-2 sm:grid-cols-[minmax(0,150px)_minmax(0,150px)_auto_auto]">
+        <div class="grid gap-2 sm:grid-cols-[minmax(0,150px)_minmax(0,150px)_auto_auto_auto]">
           <input
             id="username"
             class="h-10 rounded-lg border border-slate-200 bg-white/85 px-3 text-sm outline-none focus:border-emerald-400"
@@ -70,7 +70,8 @@
           />
           <button id="btn-login" class="btn-primary h-10 px-4 text-sm font-medium">Login</button>
           <button id="btn-logout" class="btn h-10 px-4 text-sm font-medium">Logout</button>
-          <div id="auth-message" class="hidden text-sm sm:col-span-4"></div>
+          <a id="admin-link" href="/admin" class="btn h-10 px-4 text-center text-sm font-medium">Admin</a>
+          <div id="auth-message" class="hidden text-sm sm:col-span-5"></div>
         </div>
       </header>
 
@@ -196,6 +197,8 @@
         </aside>
       </section>
     </main>
+
+    <div id="admin-root" class="hidden min-h-screen"></div>
 
     <div
       id="copy-toast"
