@@ -35,9 +35,9 @@ Edit `.env` and set at minimum:
 - `HOST_MEDIAFLOW_DATA_ROOT`
 - `MEDIAFLOW_API_BASE` (recommended `/api`)
 
-## 5) Create first user file (persistent)
+## 5) Create first user and migrate it into SQLite
 
-Create `/srv/data/mediaflow/backend-data/users.json`:
+Create a temporary legacy `/srv/data/mediaflow/backend-data/users.json` migration file:
 
 ```json
 {
@@ -59,6 +59,16 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python -c "from app.core.security import hash_password; print(hash_password('ChangeMe123!'))"
 ```
+
+Migrate that user into the SQLite users table:
+
+```bash
+USERS_FILE=/srv/data/mediaflow/backend-data/users.json \
+DB_PATH=/srv/data/mediaflow/backend-data/app.sqlite \
+python scripts/migrate_users_json_to_db.py
+```
+
+After migration, `users.json` is no longer the runtime source of truth.
 
 ## 6) Start services
 

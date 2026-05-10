@@ -8,9 +8,10 @@ from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
 from pathlib import Path
 from app.core.exceptions import QuotaExceeded
-from app.core.deps import get_current_username
+from app.core.deps import get_current_user
 from app.core.config import settings
 from app.infrastructure.jobs_store import JobsStore
+from app.infrastructure.users_repository import UserRecord
 from app.models.schemas import (
     CreateJobRequest,
     CreateJobResponse,
@@ -32,7 +33,7 @@ def _utc_now() -> str:
 @router.post("", response_model=CreateJobResponse)
 async def create_job(
     payload: CreateJobRequest,
-    username: str = Depends(get_current_username),
+    current_user: UserRecord = Depends(get_current_user),
 ) -> CreateJobResponse:
     # Lazy import to avoid circular dependency
     from app.main import get_manager  # noqa
@@ -42,7 +43,7 @@ async def create_job(
     try:
         # manager.create_job returns a tuple: (job_id, reused)
         job_id, reused = manager.create_job(
-            user=username,
+            user=current_user.username,
             url=payload.url,
             mode=payload.mode.value,
             quality=payload.quality,
@@ -61,9 +62,9 @@ async def create_job(
 @router.post("/preview", response_model=PreviewResponse)
 async def preview_job(
     payload: PreviewRequest,
-    username: str = Depends(get_current_username),
+    current_user: UserRecord = Depends(get_current_user),
 ) -> PreviewResponse:
-    _ = username
+    _ = current_user
     try:
         preview = await asyncio.to_thread(MediaPreviewer().preview, payload.url)
     except Exception as e:
@@ -96,13 +97,15 @@ async def preview_job(
 
 
 @router.get("/{job_id}", response_model=JobResponse)
-def get_job(job_id: str, username: str = Depends(get_current_username)) -> JobResponse:
+def get_job(
+    job_id: str, current_user: UserRecord = Depends(get_current_user)
+) -> JobResponse:
     store = JobsStore()
     job = store.get_job(job_id)
 
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.user != username:
+    if job.user != current_user.username:
         raise HTTPException(status_code=403, detail="Forbidden")
 
     # Injected 'error_code' so UI can distinguish between rate-limits, auth, or network errors
@@ -133,7 +136,7 @@ def get_job(job_id: str, username: str = Depends(get_current_username)) -> JobRe
 
 @router.post("/{job_id}/cancel", response_model=CancelJobResponse)
 async def cancel_job(
-    job_id: str, username: str = Depends(get_current_username)
+    job_id: str, current_user: UserRecord = Depends(get_current_user)
 ) -> CancelJobResponse:
     from app.main import get_manager  # noqa
 
@@ -142,7 +145,7 @@ async def cancel_job(
 
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.user != username:
+    if job.user != current_user.username:
         raise HTTPException(status_code=403, detail="Forbidden")
 
     manager = get_manager()
@@ -196,14 +199,14 @@ def _delete_output_dir(out_dir: Path) -> None:
 def download(
     job_id: str,
     background_tasks: BackgroundTasks,
-    username: str = Depends(get_current_username),
+    current_user: UserRecord = Depends(get_current_user),
 ):
     store = JobsStore()
     job = store.get_job(job_id)
 
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.user != username:
+    if job.user != current_user.username:
         raise HTTPException(status_code=403, detail="Forbidden")
     if job.status != "succeeded":
         raise HTTPException(
@@ -241,10 +244,10 @@ def download(
 
 @router.get("", response_model=list[JobResponse])
 def list_jobs(
-    username: str = Depends(get_current_username), limit: int = 50
+    current_user: UserRecord = Depends(get_current_user), limit: int = 50
 ) -> list[JobResponse]:
     store = JobsStore()
-    jobs = store.list_jobs_for_user(user=username, limit=limit)
+    jobs = store.list_jobs_for_user(user=current_user.username, limit=limit)
     return [
         JobResponse(
             job_id=j.job_id,
@@ -274,12 +277,14 @@ def list_jobs(
 
 
 @router.get("/{job_id}/events")
-async def job_events(job_id: str, username: str = Depends(get_current_username)):
+async def job_events(
+    job_id: str, current_user: UserRecord = Depends(get_current_user)
+):
     store = JobsStore()
     job = store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.user != username:
+    if job.user != current_user.username:
         raise HTTPException(status_code=403, detail="Forbidden")
 
     async def event_stream():
@@ -318,12 +323,14 @@ async def job_events(job_id: str, username: str = Depends(get_current_username))
 
 
 @router.get("/{job_id}/report")
-def download_report(job_id: str, username: str = Depends(get_current_username)):
+def download_report(
+    job_id: str, current_user: UserRecord = Depends(get_current_user)
+):
     store = JobsStore()
     job = store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.user != username:
+    if job.user != current_user.username:
         raise HTTPException(status_code=403, detail="Forbidden")
 
     out_dir = Path(settings.outputs_dir) / job_id

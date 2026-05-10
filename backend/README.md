@@ -46,7 +46,7 @@ This repository is intentionally **not** an enterprise platform. It is a lightwe
 
 - Python 3.11+
 - FastAPI + Uvicorn
-- SQLite (jobs + usage events)
+- SQLite (users, jobs, and usage events)
 - yt-dlp (download/extract)
 - FFmpeg (merge/convert/embed)
 - Node.js (used by yt-dlp for YouTube JavaScript challenge solving)
@@ -71,10 +71,11 @@ backend/
       exceptions.py
       logging.py
       security.py
+      users.py
     infrastructure/
       db.py
       jobs_store.py
-      users_store.py
+      users_repository.py
       usage_store.py
     services/
       backoff.py
@@ -90,8 +91,9 @@ backend/
       youtube_processor.py
     models/
       schemas.py
+  scripts/
+    migrate_users_json_to_db.py
   data/
-    users.json
     app.sqlite
   outputs/
   README.md
@@ -194,7 +196,7 @@ CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 python -c "from app.core.security import hash_password; print(hash_password('ChangeMe123!'))"
 ```
 
-2) Put the result in `data/users.json`:
+2) Put the result in a temporary legacy `data/users.json` migration file:
 ```json
 {
   "users": [
@@ -205,6 +207,13 @@ python -c "from app.core.security import hash_password; print(hash_password('Cha
   ]
 }
 ```
+
+3) Migrate the user into SQLite:
+```bash
+python scripts/migrate_users_json_to_db.py
+```
+
+After migration, `data/users.json` is no longer used as the runtime authentication source.
 
 ### 5) Run the server
 ```bash
@@ -241,7 +250,7 @@ Common settings:
 | `CORS_ORIGINS` | *(required)* | Comma-separated allowed origins (e.g., `http://localhost:3000`) |
 | `JWT_ALGORITHM` | `HS256` | JWT algorithm |
 | `JWT_EXP_MINUTES` | `60` | Token lifetime |
-| `USERS_FILE` | `data/users.json` | Users store path |
+| `USERS_FILE` | `data/users.json` | Legacy users JSON path used by the migration script |
 | `DB_PATH` | `data/app.sqlite` | SQLite DB path |
 | `OUTPUTS_DIR` | `outputs` | Output root folder |
 | `MAX_PARALLEL_JOBS` | `2` | Global concurrent processing limit |
@@ -267,6 +276,18 @@ Common settings:
 
 ## Authentication
 
+Users are stored in the SQLite `users` table. Legacy `users.json` files are only
+used as migration input and are not the runtime source of truth after migration.
+
+User records include `role`, `status`, `token_version`, `last_login_at`, and
+soft-delete fields. Login is allowed only for users with `status="active"` and
+`deleted_at=null`.
+
+New JWTs use the database user id as `sub` and also include `username`, `role`,
+and `token_version`. The current-user dependency checks the token version against
+the database, so incrementing `token_version` invalidates older tokens. Soft
+delete sets `status="deleted"` and `deleted_at`.
+
 1) Login:
 - `POST /auth/login` with JSON body:
 ```json
@@ -284,6 +305,18 @@ In `/docs` click **Authorize** and paste:
 ```
 Bearer <access_token>
 ```
+
+### Migrating Legacy `users.json`
+
+To migrate existing bcrypt hashes from the old JSON store:
+
+```bash
+python scripts/migrate_users_json_to_db.py --users-file data/users.json
+```
+
+The script inserts users that do not already exist, preserves existing
+`password_hash` values, sets `role="user"`, `status="active"`, and
+`token_version=1`, and is safe to run more than once.
 
 ---
 

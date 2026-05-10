@@ -1,4 +1,6 @@
 import sqlite3
+from contextlib import contextmanager
+from collections.abc import Iterator
 from pathlib import Path
 
 from app.core.config import settings
@@ -8,8 +10,34 @@ def ensure_db_initialized() -> None:
     db_path = Path(settings.db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with sqlite3.connect(db_path) as conn:
+    conn = sqlite3.connect(db_path)
+    try:
         conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                email TEXT UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user',
+                status TEXT NOT NULL DEFAULT 'active',
+                token_version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_login_at TEXT,
+                deleted_at TEXT
+            );
+            """
+        )
+
+        try:
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users(deleted_at);")
+        except sqlite3.OperationalError:
+            pass
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS jobs (
@@ -64,6 +92,8 @@ def ensure_db_initialized() -> None:
         )
 
         conn.commit()
+    finally:
+        conn.close()
 
 
 def _try_add_column(conn: sqlite3.Connection, table: str, col_def: str) -> None:
@@ -75,7 +105,14 @@ def _try_add_column(conn: sqlite3.Connection, table: str, col_def: str) -> None:
         pass
 
 
-def get_conn() -> sqlite3.Connection:
+@contextmanager
+def get_conn() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(settings.db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
