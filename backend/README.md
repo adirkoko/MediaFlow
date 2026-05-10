@@ -62,7 +62,10 @@ backend/
   app/
     main.py
     api/
+      routes_admin_quotas.py
+      routes_admin_security.py
       routes_admin_users.py
+      routes_admin_usage.py
       routes_auth.py
       routes_health.py
       routes_jobs.py
@@ -79,6 +82,9 @@ backend/
       audit_logs_repository.py
       db.py
       jobs_store.py
+      quotas_repository.py
+      security_repository.py
+      usage_repository.py
       users_repository.py
       usage_store.py
     services/
@@ -91,7 +97,10 @@ backend/
       job_manager.py
       media_preview.py
       packaging.py
+      quota_service.py
+      rate_limiter.py
       reporting.py
+      usage_service.py
       worker.py
       youtube_processor.py
     models/
@@ -262,6 +271,12 @@ Common settings:
 | `QUEUE_MAX_SIZE` | `50` | In-memory queue capacity |
 | `MAX_ACTIVE_JOBS_PER_USER` | `2` | Per-user quota for queued/running jobs |
 | `DEDUP_WINDOW_MINUTES` | `60` | Dedup window for identical requests |
+| `LOGIN_MAX_FAILED_PER_USERNAME` | `5` | Failed login limit per username within `LOGIN_WINDOW_MINUTES` |
+| `LOGIN_MAX_FAILED_PER_IP` | `20` | Failed login limit per IP hash within `LOGIN_WINDOW_MINUTES` |
+| `LOGIN_WINDOW_MINUTES` | `10` | Login brute-force counting window |
+| `LOGIN_BLOCK_MINUTES` | `15` | Suggested retry delay returned for blocked logins |
+| `JOB_CREATE_RATE_LIMIT_PER_MINUTE` | `20` | Per-user in-memory rate limit for `POST /jobs` |
+| `JOB_PREVIEW_RATE_LIMIT_PER_MINUTE` | `30` | Per-user in-memory rate limit for `POST /jobs/preview` |
 | `OUTPUTS_TTL_HOURS` | `24` | Output folder time-to-live (hours) |
 | `OUTPUTS_TTL_MINUTES` | `0` | Minutes override for TTL. Use `0` to disable minutes and fall back to `OUTPUTS_TTL_HOURS`. |
 | `OUTPUTS_CLEANUP_INTERVAL_MINUTES` | `60` | Cleanup scheduler interval |
@@ -356,6 +371,58 @@ Admin actions write basic rows to `audit_logs` with action, actor, target, JSON
 metadata, and timestamp. Passwords and password hashes are not written to audit
 metadata.
 
+### Quotas, Credits, and Anti-Abuse
+
+MediaFlow stores role defaults in `role_quotas` and optional per-user overrides
+in `user_quotas`. If a user override field is `null`, the role quota applies.
+Default role quotas are seeded for `user` and `admin` at startup.
+
+Job requests are estimated in credits before a job is created:
+
+- Audio single video: `1`
+- Video: `144p=1`, `240p=1`, `360p=2`, `480p=2`, `720p=3`, `1080p=5`, `1440p=8`, `2160p=12`, `best=5`
+- Playlists multiply the per-item cost by the estimated item count.
+- Long videos receive a simple duration multiplier when duration is known.
+
+Quota checks run before `POST /jobs` creates a job. They enforce active jobs,
+daily/weekly/monthly job counts, daily/weekly/monthly estimated credits, playlist
+item limits, max video quality, and max duration when known. Rejected jobs return
+`429` with a structured error and are recorded as `quota_exceeded`.
+
+Usage is recorded in `usage_events` and rolled up into `user_usage_daily` for
+today/week/month style queries. Raw URLs are not stored; usage events store a URL
+hash when needed.
+
+Login brute-force protection records `login_attempts` and temporarily blocks
+excessive failures by username/IP hash. Job creation and preview endpoints also
+have lightweight in-memory per-user rate limits. These rate limits are
+per-process; for multi-process deployments a shared store such as Redis would be
+a later upgrade.
+
+### Admin Quota, Usage, and Security APIs
+
+- `GET /admin/quotas/roles`
+- `GET /admin/quotas/roles/{role}`
+- `PATCH /admin/quotas/roles/{role}`
+- `GET /admin/users/{user_id}/quota`
+- `PATCH /admin/users/{user_id}/quota`
+- `DELETE /admin/users/{user_id}/quota`
+- `GET /admin/usage/summary?range=today|week|month`
+- `GET /admin/usage/users?range=today|week|month`
+- `GET /admin/usage/users/{user_id}?range=today|week|month`
+- `GET /admin/usage/users/{user_id}/daily?days=30`
+- `GET /admin/usage/heavy-users?range=today|week|month`
+- `GET /admin/usage/quota-exceeded?range=today|week|month`
+- `GET /admin/security/login-attempts`
+- `GET /admin/security/blocked-logins`
+- `GET /admin/security/audit-logs`
+
+Users can inspect their own limits with:
+
+- `GET /me/usage?range=today|week|month`
+- `GET /me/usage/daily?days=30`
+- `GET /me/limits`
+
 ---
 
 ## API Overview
@@ -375,6 +442,8 @@ metadata.
 
 ### Usage
 - `GET /me/usage` -- basic per-user usage summary
+- `GET /me/usage/daily` -- per-day usage rows
+- `GET /me/limits` -- effective quota, usage, and remaining limits
 
 ### Admin Users
 - `GET /admin/users`
@@ -386,6 +455,17 @@ metadata.
 - `POST /admin/users/{user_id}/soft-delete`
 - `POST /admin/users/{user_id}/reset-password`
 - `POST /admin/users/{user_id}/revoke-tokens`
+
+### Admin Quotas, Usage, and Security
+- `GET /admin/quotas/roles`
+- `PATCH /admin/quotas/roles/{role}`
+- `GET /admin/users/{user_id}/quota`
+- `PATCH /admin/users/{user_id}/quota`
+- `DELETE /admin/users/{user_id}/quota`
+- `GET /admin/usage/summary`
+- `GET /admin/usage/heavy-users`
+- `GET /admin/security/login-attempts`
+- `GET /admin/security/audit-logs`
 
 ---
 

@@ -3,7 +3,10 @@ import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes_admin_quotas import router as admin_quotas_router
+from app.api.routes_admin_security import router as admin_security_router
 from app.api.routes_admin_users import router as admin_users_router
+from app.api.routes_admin_usage import router as admin_usage_router
 from app.api.routes_auth import router as auth_router
 from app.api.routes_health import router as health_router
 from app.api.routes_jobs import router as jobs_router
@@ -36,6 +39,9 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(admin_users_router)
+app.include_router(admin_quotas_router)
+app.include_router(admin_usage_router)
+app.include_router(admin_security_router)
 app.include_router(jobs_router)
 app.include_router(usage_router)
 

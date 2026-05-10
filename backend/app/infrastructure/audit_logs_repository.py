@@ -40,3 +40,17 @@ class AuditLogsRepository:
                 ),
             )
             conn.commit()
+
+    def list_events(self, limit: int = 100) -> list[dict[str, Any]]:
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, actor_user_id, action, target_type, target_id,
+                       metadata_json, created_at
+                FROM audit_logs
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (max(1, min(int(limit), 500)),),
+            ).fetchall()
+            return [dict(row) for row in rows]

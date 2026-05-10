@@ -41,6 +41,16 @@ class Settings(BaseSettings):
         60  # within this window, same request reuses existing job
     )
 
+    # Login protection
+    login_max_failed_per_username: int = 5
+    login_max_failed_per_ip: int = 20
+    login_window_minutes: int = 10
+    login_block_minutes: int = 15
+
+    # Lightweight job endpoint rate limits (per process in this phase)
+    job_create_rate_limit_per_minute: int = 20
+    job_preview_rate_limit_per_minute: int = 30
+
     # Backoff
     max_attempts: int = 4
     backoff_base_seconds: float = 2.0

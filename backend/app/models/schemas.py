@@ -189,5 +189,53 @@ class AdminResetPasswordRequest(BaseModel):
     new_password: str = Field(min_length=1)
 
 
+class QuotaUpdateRequest(BaseModel):
+    max_active_jobs: int | None = None
+    max_jobs_per_day: int | None = None
+    max_jobs_per_week: int | None = None
+    max_jobs_per_month: int | None = None
+    max_credits_per_day: int | None = None
+    max_credits_per_week: int | None = None
+    max_credits_per_month: int | None = None
+    max_playlist_items_per_job: int | None = None
+    max_playlist_items_per_day: int | None = None
+    max_video_duration_seconds: int | None = None
+    max_video_quality: str | None = None
+    max_output_mb_per_day: int | None = None
+    max_output_mb_per_month: int | None = None
+
+    @field_validator("max_video_quality")
+    @classmethod
+    def validate_video_quality(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        quality = value.strip().lower()
+        if quality.isdigit():
+            quality = f"{quality}p"
+        allowed = {"best", "144p", "240p", "360p", "480p", "720p", "1080p", "1440p", "2160p"}
+        if quality not in allowed:
+            raise ValueError("Unsupported video quality")
+        return quality
+
+
+class RoleQuotaResponse(BaseModel):
+    role: str
+    quota: dict
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class UserQuotaResponse(BaseModel):
+    user_id: str
+    role: str
+    effective_quota: dict
+    override_quota: dict | None = None
+
+
+class UsageSummaryResponse(BaseModel):
+    range: str
+    summary: dict
+
+
 
 

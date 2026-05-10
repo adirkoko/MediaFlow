@@ -7,9 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
 from pathlib import Path
-from app.core.exceptions import QuotaExceeded
+from app.core.exceptions import QuotaExceeded as ActiveJobsQuotaExceeded
 from app.core.deps import get_current_user
 from app.core.config import settings
+from app.infrastructure.audit_logs_repository import AuditLogsRepository
 from app.infrastructure.jobs_store import JobsStore
 from app.infrastructure.users_repository import UserRecord
 from app.models.schemas import (
@@ -22,6 +23,9 @@ from app.models.schemas import (
     VideoQualityPreviewResponse,
 )
 from app.services.media_preview import MediaPreviewer
+from app.services.quota_service import QuotaService
+from app.services.rate_limiter import rate_limiter
+from app.services.usage_service import UsageService
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -39,6 +43,42 @@ async def create_job(
     from app.main import get_manager  # noqa
 
     manager = get_manager()
+    usage = UsageService()
+    audit = AuditLogsRepository()
+
+    try:
+        rate_limiter.check(
+            key=f"job-create:{current_user.id}",
+            limit=settings.job_create_rate_limit_per_minute,
+        )
+    except HTTPException as e:
+        usage.record_rate_limited(current_user.id, "POST /jobs", e.detail)
+        audit.add_event(
+            actor_user_id="system",
+            action="JOB_RATE_LIMITED",
+            target_type="user",
+            target_id=current_user.id,
+            metadata={"endpoint": "POST /jobs", "detail": e.detail},
+        )
+        raise
+
+    quota = QuotaService(usage=usage)
+    try:
+        estimate = quota.check_can_create_job(
+            current_user,
+            url=payload.url,
+            mode=payload.mode.value,
+            quality=payload.quality,
+        )
+    except HTTPException as e:
+        audit.add_event(
+            actor_user_id="system",
+            action="JOB_REJECTED_BY_QUOTA",
+            target_type="user",
+            target_id=current_user.id,
+            metadata={"endpoint": "POST /jobs", "detail": e.detail},
+        )
+        raise
 
     try:
         # manager.create_job returns a tuple: (job_id, reused)
@@ -48,12 +88,20 @@ async def create_job(
             mode=payload.mode.value,
             quality=payload.quality,
         )
-    except QuotaExceeded as e:
+    except ActiveJobsQuotaExceeded as e:
         # 429 status is appropriate for Quota/Rate limits
         raise HTTPException(status_code=429, detail=str(e))
 
     # Only enqueue if it's a fresh job, not a reused one
     if not reused:
+        quota.reserve_usage_for_job(
+            current_user,
+            job_id=job_id,
+            url=payload.url,
+            mode=payload.mode.value,
+            quality=payload.quality,
+            estimate=estimate,
+        )
         await manager.enqueue(job_id)
 
     return CreateJobResponse(job_id=job_id, status="queued", reused=reused)
@@ -64,7 +112,22 @@ async def preview_job(
     payload: PreviewRequest,
     current_user: UserRecord = Depends(get_current_user),
 ) -> PreviewResponse:
-    _ = current_user
+    usage = UsageService()
+    try:
+        rate_limiter.check(
+            key=f"job-preview:{current_user.id}",
+            limit=settings.job_preview_rate_limit_per_minute,
+        )
+    except HTTPException as e:
+        usage.record_rate_limited(current_user.id, "POST /jobs/preview", e.detail)
+        AuditLogsRepository().add_event(
+            actor_user_id="system",
+            action="JOB_RATE_LIMITED",
+            target_type="user",
+            target_id=current_user.id,
+            metadata={"endpoint": "POST /jobs/preview", "detail": e.detail},
+        )
+        raise
     try:
         preview = await asyncio.to_thread(MediaPreviewer().preview, payload.url)
     except Exception as e:
@@ -168,6 +231,14 @@ async def cancel_job(
             error_message="Job canceled by user",
             error_code="CANCELED",
         )
+        UsageService().record_job_finished(
+            user_id=current_user.id,
+            job_id=job_id,
+            event_type="job_canceled",
+            mode=job.mode,
+            quality=job.quality,
+            error_code="CANCELED",
+        )
         return CancelJobResponse(job_id=job_id, status="canceled", cancel_requested=True)
 
     if job.status == "running":
@@ -221,6 +292,7 @@ def download(
     if job.output_filename:
         p = out_dir / job.output_filename
         if p.exists():
+            UsageService().record_download_result(current_user.id, job_id, p.stat().st_size)
             background_tasks.add_task(_delete_output_dir, out_dir)
             return FileResponse(path=str(p), filename=p.name)
 
@@ -229,6 +301,7 @@ def download(
     for name in candidates:
         p = out_dir / name
         if p.exists():
+            UsageService().record_download_result(current_user.id, job_id, p.stat().st_size)
             background_tasks.add_task(_delete_output_dir, out_dir)
             return FileResponse(path=str(p), filename=p.name)
 
@@ -236,6 +309,7 @@ def download(
     valid_extensions = {".mp3", ".mp4", ".mkv", ".webm", ".zip"}
     for p in out_dir.iterdir():
         if p.is_file() and p.suffix.lower() in valid_extensions:
+            UsageService().record_download_result(current_user.id, job_id, p.stat().st_size)
             background_tasks.add_task(_delete_output_dir, out_dir)
             return FileResponse(path=str(p), filename=p.name)
 

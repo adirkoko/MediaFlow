@@ -6,7 +6,7 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.infrastructure.jobs_store import JobsStore
-from app.infrastructure.usage_store import UsageStore
+from app.infrastructure.users_repository import UsersRepository
 from app.services.backoff import BackoffConfig, run_with_backoff
 from app.services.cookies import prepare_job_cookies
 from app.services.error_codes import classify_error, is_retryable_error
@@ -14,6 +14,8 @@ from app.services.job_logging import JobLogger
 from app.services.job_manager import JobManager
 from app.services.youtube_processor import YouTubeProcessor
 from app.core.exceptions import AllPlaylistItemsFailed, JobCanceled
+from app.services.quota_service import QuotaService
+from app.services.usage_service import UsageService
 
 log = logging.getLogger("worker")
 
@@ -29,7 +31,9 @@ class Worker:
         self._store = JobsStore()
         self._semaphore = asyncio.Semaphore(settings.max_parallel_jobs)
         self._processor = YouTubeProcessor()
-        self._usage = UsageStore()
+        self._usage = UsageService()
+        self._users = UsersRepository()
+        self._quota = QuotaService()
 
     async def run_forever(self) -> None:
         """Main loop that listens to the queue and spawns job tasks."""
@@ -80,6 +84,9 @@ class Worker:
                 )
 
             log.info("Starting job %s for user=%s", job_id, job.user)
+            user = self._users.get_user_by_username(job.user)
+            if user:
+                self._usage.record_job_started(user.id, job_id, job.mode, job.quality)
             self._store.update_status(job_id, "running", started_at=_utc_now())
             self._store.update_progress(
                 job_id,
@@ -164,15 +171,34 @@ class Worker:
                     playlist_failed=result.playlist_failed,
                 )
 
-                # Usage metrics (operational visibility).
-                self._usage.add_event(
-                    user=job.user,
-                    mode=job.mode,
-                    is_playlist=result.is_playlist,
-                    duration_ms=duration_ms,
-                    success=True,
-                    created_at=_utc_now(),
-                )
+                user = user or self._users.get_user_by_username(job.user)
+                if user:
+                    estimate = self._quota.estimate_job_cost(
+                        mode=job.mode,
+                        quality=job.quality,
+                        url=job.url,
+                    )
+                    output_size = result.output_path.stat().st_size if result.output_path.exists() else None
+                    actual_items = result.playlist_succeeded if result.is_playlist else 1
+                    actual_credits = max(
+                        1,
+                        int(estimate.estimated_credits / max(1, estimate.playlist_items))
+                        * max(1, actual_items or 1),
+                    )
+                    self._usage.record_job_finished(
+                        user_id=user.id,
+                        job_id=job_id,
+                        event_type="job_succeeded",
+                        mode=job.mode,
+                        quality=job.quality,
+                        estimated_credits=estimate.estimated_credits,
+                        actual_credits=actual_credits,
+                        processing_time_ms=duration_ms,
+                        output_size_bytes=output_size,
+                        is_playlist=result.is_playlist,
+                        playlist_items_succeeded=result.playlist_succeeded,
+                        playlist_items_failed=result.playlist_failed,
+                    )
 
                 log.info("Job %s succeeded", job_id)
 
@@ -197,15 +223,17 @@ class Worker:
                     error_code="CANCELED",
                 )
 
-                is_playlist = "list=" in (job.url or "").lower()
-                self._usage.add_event(
-                    user=job.user,
-                    mode=job.mode,
-                    is_playlist=is_playlist,
-                    duration_ms=duration_ms,
-                    success=False,
-                    created_at=_utc_now(),
-                )
+                user = user or self._users.get_user_by_username(job.user)
+                if user:
+                    self._usage.record_job_finished(
+                        user_id=user.id,
+                        job_id=job_id,
+                        event_type="job_canceled",
+                        mode=job.mode,
+                        quality=job.quality,
+                        processing_time_ms=duration_ms,
+                        error_code="CANCELED",
+                    )
 
             except Exception as e:
                 duration_ms = int((time.perf_counter() - t0) * 1000)
@@ -214,8 +242,6 @@ class Worker:
                 job_log.log(f"ERROR={type(e).__name__}: {e}")
 
                 error_code = classify_error(e)
-                is_playlist = "list=" in (job.url or "").lower()
-
                 p_total, p_succeeded, p_failed = None, None, None
                 if isinstance(e, AllPlaylistItemsFailed):
                     p_total = e.total
@@ -241,14 +267,18 @@ class Worker:
                     playlist_failed=p_failed,
                 )
 
-                self._usage.add_event(
-                    user=job.user,
-                    mode=job.mode,
-                    is_playlist=is_playlist,
-                    duration_ms=duration_ms,
-                    success=False,
-                    created_at=_utc_now(),
-                )
+                user = user or self._users.get_user_by_username(job.user)
+                if user:
+                    self._usage.record_job_finished(
+                        user_id=user.id,
+                        job_id=job_id,
+                        event_type="job_failed",
+                        mode=job.mode,
+                        quality=job.quality,
+                        processing_time_ms=duration_ms,
+                        error_code=error_code,
+                        playlist_items_failed=p_failed,
+                    )
 
             finally:
                 # Always clean up the temporary cookie file.
