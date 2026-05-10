@@ -14,6 +14,7 @@ This repository is intentionally **not** an enterprise platform. It is a lightwe
 ## Features
 
 - **Authenticated access** (username/password -> JWT Bearer token).
+- **Admin user management API** for DB-backed users (create/update/disable/enable/soft-delete/reset password/revoke tokens).
 - **Jobs API** for single videos or playlists:
   - Preview endpoint before job creation (title, thumbnail, playlist/video basics, available video qualities when yt-dlp can resolve them)
   - Audio or video output
@@ -38,6 +39,7 @@ This repository is intentionally **not** an enterprise platform. It is a lightwe
   - `progress_percent`, `stage`, `eta_seconds`, `speed_bps`
   - Live updates via **SSE** (`/jobs/{job_id}/events`)
 - **Usage tracking** (`/me/usage`): basic counters and average processing time
+- **Admin audit log basics** for user-management actions.
 - **Output TTL cleanup**: automatically removes old job output folders
 
 ---
@@ -60,6 +62,7 @@ backend/
   app/
     main.py
     api/
+      routes_admin_users.py
       routes_auth.py
       routes_health.py
       routes_jobs.py
@@ -73,11 +76,13 @@ backend/
       security.py
       users.py
     infrastructure/
+      audit_logs_repository.py
       db.py
       jobs_store.py
       users_repository.py
       usage_store.py
     services/
+      admin_users_service.py
       backoff.py
       cleanup.py
       cookies.py
@@ -318,6 +323,39 @@ The script inserts users that do not already exist, preserves existing
 `password_hash` values, sets `role="user"`, `status="active"`, and
 `token_version=1`, and is safe to run more than once.
 
+### Creating or Promoting the First Admin
+
+The migration script imports legacy users with `role="user"`. To bootstrap admin
+access, promote one trusted user directly in SQLite after migration:
+
+```bash
+sqlite3 data/app.sqlite "UPDATE users SET role='admin', updated_at=datetime('now') WHERE username='admin';"
+```
+
+For Docker production, run the same update against the mounted DB path, for
+example `/srv/data/mediaflow/backend-data/app.sqlite`.
+
+### Admin User API
+
+Admin endpoints require a valid JWT for a user with `role="admin"`:
+
+- `GET /admin/users` -- list users, with optional `status`, `role`, `search`, and `include_deleted` filters.
+- `POST /admin/users` -- create a user. Passwords are hashed; password hashes are never returned.
+- `GET /admin/users/{user_id}` -- fetch one user.
+- `PATCH /admin/users/{user_id}` -- update `username`, `email`, `role`, or `status`.
+- `POST /admin/users/{user_id}/disable` -- set `status="disabled"` and increment `token_version`.
+- `POST /admin/users/{user_id}/enable` -- set `status="active"` and increment `token_version`; soft-deleted users cannot be re-enabled.
+- `POST /admin/users/{user_id}/soft-delete` -- set `status="deleted"`, set `deleted_at`, and increment `token_version`.
+- `POST /admin/users/{user_id}/reset-password` -- hash a new password and increment `token_version`.
+- `POST /admin/users/{user_id}/revoke-tokens` -- increment `token_version` to invalidate issued access tokens.
+
+Safety checks prevent an admin from disabling or soft-deleting themselves, and
+prevent removing the only active admin role from your own account.
+
+Admin actions write basic rows to `audit_logs` with action, actor, target, JSON
+metadata, and timestamp. Passwords and password hashes are not written to audit
+metadata.
+
 ---
 
 ## API Overview
@@ -337,6 +375,17 @@ The script inserts users that do not already exist, preserves existing
 
 ### Usage
 - `GET /me/usage` -- basic per-user usage summary
+
+### Admin Users
+- `GET /admin/users`
+- `POST /admin/users`
+- `GET /admin/users/{user_id}`
+- `PATCH /admin/users/{user_id}`
+- `POST /admin/users/{user_id}/disable`
+- `POST /admin/users/{user_id}/enable`
+- `POST /admin/users/{user_id}/soft-delete`
+- `POST /admin/users/{user_id}/reset-password`
+- `POST /admin/users/{user_id}/revoke-tokens`
 
 ---
 

@@ -68,12 +68,74 @@ class UsersRepository:
             ).fetchone()
             return _row_to_user(row)
 
+    def get_user_by_email(self, email: str) -> UserRecord | None:
+        clean_email = email.strip().lower()
+        if not clean_email:
+            return None
+
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE lower(email) = ?",
+                (clean_email,),
+            ).fetchone()
+            return _row_to_user(row)
+
+    def list_users(
+        self,
+        status: str | None = None,
+        role: str | None = None,
+        search: str | None = None,
+        include_deleted: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[UserRecord]:
+        clauses: list[str] = []
+        args: list[object] = []
+
+        if status:
+            clauses.append("status = ?")
+            args.append(_validate_status(status))
+        elif not include_deleted:
+            clauses.append("status != ?")
+            args.append(USER_STATUS_DELETED)
+
+        if not include_deleted:
+            clauses.append("deleted_at IS NULL")
+
+        if role:
+            clauses.append("role = ?")
+            args.append(_validate_role(role))
+
+        if search and search.strip():
+            pattern = f"%{search.strip().lower()}%"
+            clauses.append("(lower(username) LIKE ? OR lower(COALESCE(email, '')) LIKE ?)")
+            args.extend([pattern, pattern])
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        safe_limit = max(1, min(int(limit), 500))
+        safe_offset = max(0, int(offset))
+        args.extend([safe_limit, safe_offset])
+
+        with get_conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM users
+                {where}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                tuple(args),
+            ).fetchall()
+            return [UserRecord(**dict(row)) for row in rows]
+
     def create_user(
         self,
         username: str,
         password_hash: str,
         email: str | None = None,
         role: str = USER_ROLE_USER,
+        status: str = USER_STATUS_ACTIVE,
     ) -> UserRecord:
         clean_username = username.strip()
         if not clean_username:
@@ -83,6 +145,7 @@ class UsersRepository:
 
         clean_email = email.strip() if isinstance(email, str) and email.strip() else None
         clean_role = _validate_role(role)
+        clean_status = _validate_status(status)
         now = _utc_now()
         user_id = uuid.uuid4().hex
 
@@ -101,7 +164,7 @@ class UsersRepository:
                     clean_email,
                     password_hash,
                     clean_role,
-                    USER_STATUS_ACTIVE,
+                    clean_status,
                     1,
                     now,
                     now,
@@ -127,6 +190,68 @@ class UsersRepository:
             )
             conn.commit()
 
+    def update_user(
+        self,
+        user_id: str,
+        fields: dict[str, object],
+        increment_token_version: bool = False,
+    ) -> UserRecord | None:
+        allowed = {"username", "email", "role", "status"}
+        updates: list[str] = []
+        args: list[object] = []
+
+        for key, value in fields.items():
+            if key not in allowed:
+                raise ValueError(f"Unsupported user field: {key}")
+            if key == "username":
+                clean_username = str(value or "").strip()
+                if not clean_username:
+                    raise ValueError("username is required")
+                updates.append("username = ?")
+                args.append(clean_username)
+            elif key == "email":
+                clean_email = (
+                    str(value).strip()
+                    if isinstance(value, str) and str(value).strip()
+                    else None
+                )
+                updates.append("email = ?")
+                args.append(clean_email)
+            elif key == "role":
+                updates.append("role = ?")
+                args.append(_validate_role(str(value)))
+            elif key == "status":
+                clean_status = _validate_status(str(value))
+                updates.append("status = ?")
+                args.append(clean_status)
+                if clean_status == USER_STATUS_DELETED:
+                    updates.append("deleted_at = COALESCE(deleted_at, ?)")
+                    args.append(_utc_now())
+
+        if not updates:
+            return self.get_user_by_id(user_id)
+
+        updates.append("updated_at = ?")
+        args.append(_utc_now())
+
+        if increment_token_version:
+            updates.append("token_version = token_version + 1")
+
+        args.append(str(user_id))
+
+        with get_conn() as conn:
+            conn.execute(
+                f"""
+                UPDATE users
+                SET {', '.join(updates)}
+                WHERE id = ?
+                """,
+                tuple(args),
+            )
+            conn.commit()
+
+        return self.get_user_by_id(user_id)
+
     def increment_user_token_version(self, user_id: str) -> None:
         now = _utc_now()
         with get_conn() as conn:
@@ -141,18 +266,28 @@ class UsersRepository:
             )
             conn.commit()
 
-    def set_user_status(self, user_id: str, status: str) -> None:
+    def set_user_status(
+        self,
+        user_id: str,
+        status: str,
+        increment_token_version: bool = False,
+    ) -> None:
         clean_status = _validate_status(status)
         now = _utc_now()
+        updates = ["status = ?", "updated_at = ?"]
+        args: list[object] = [clean_status, now]
+        if increment_token_version:
+            updates.append("token_version = token_version + 1")
+        args.append(str(user_id))
+
         with get_conn() as conn:
             conn.execute(
-                """
+                f"""
                 UPDATE users
-                SET status = ?,
-                    updated_at = ?
+                SET {', '.join(updates)}
                 WHERE id = ?
                 """,
-                (clean_status, now, str(user_id)),
+                tuple(args),
             )
             conn.commit()
 
@@ -171,3 +306,34 @@ class UsersRepository:
                 (USER_STATUS_DELETED, now, now, str(user_id)),
             )
             conn.commit()
+
+    def reset_user_password(self, user_id: str, password_hash: str) -> None:
+        if not password_hash:
+            raise ValueError("password_hash is required")
+
+        now = _utc_now()
+        with get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE users
+                SET password_hash = ?,
+                    token_version = token_version + 1,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (password_hash, now, str(user_id)),
+            )
+            conn.commit()
+
+    def count_active_admins(self) -> int:
+        with get_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS c
+                FROM users
+                WHERE role = 'admin'
+                  AND status = 'active'
+                  AND deleted_at IS NULL
+                """
+            ).fetchone()
+            return int(row["c"])

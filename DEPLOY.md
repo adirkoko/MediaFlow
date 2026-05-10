@@ -70,6 +70,13 @@ python scripts/migrate_users_json_to_db.py
 
 After migration, `users.json` is no longer the runtime source of truth.
 
+Promote the first trusted user to admin so the admin API can manage users:
+
+```bash
+sqlite3 /srv/data/mediaflow/backend-data/app.sqlite \
+  "UPDATE users SET role='admin', updated_at=datetime('now') WHERE username='admin';"
+```
+
 ## 6) Start services
 
 The frontend image runs the Vite production build during `docker compose build`

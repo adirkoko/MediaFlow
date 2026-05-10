@@ -91,6 +91,27 @@ def ensure_db_initialized() -> None:
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor_user_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                metadata_json TEXT,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_user_id, created_at);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_target ON audit_logs(target_type, target_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);")
+        except sqlite3.OperationalError:
+            pass
+
         conn.commit()
     finally:
         conn.close()

@@ -1,7 +1,8 @@
 # backend/app/models/schemas.py
 from enum import Enum
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.core.users import ALLOWED_USER_ROLES, ALLOWED_USER_STATUSES, USER_STATUS_DELETED
 from app.services.download_validation import validate_download_request, validate_youtube_url
 
 
@@ -116,6 +117,76 @@ class JobResponse(BaseModel):
     playlist_total: int | None = None
     playlist_succeeded: int | None = None
     playlist_failed: int | None = None
+
+
+class AdminUserResponse(BaseModel):
+    id: str
+    username: str
+    email: str | None = None
+    role: str
+    status: str
+    token_version: int
+    created_at: str
+    updated_at: str
+    last_login_at: str | None = None
+    deleted_at: str | None = None
+
+
+class AdminCreateUserRequest(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+    email: str | None = None
+    role: str = "user"
+    status: str = "active"
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        role = value.strip().lower()
+        if role not in ALLOWED_USER_ROLES:
+            raise ValueError("Unsupported user role")
+        return role
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str) -> str:
+        status = value.strip().lower()
+        if status not in ALLOWED_USER_STATUSES:
+            raise ValueError("Unsupported user status")
+        if status == USER_STATUS_DELETED:
+            raise ValueError("Users cannot be created directly as deleted")
+        return status
+
+
+class AdminUpdateUserRequest(BaseModel):
+    username: str | None = Field(default=None, min_length=1)
+    email: str | None = None
+    role: str | None = None
+    status: str | None = None
+
+    @field_validator("role")
+    @classmethod
+    def validate_optional_role(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        role = value.strip().lower()
+        if role not in ALLOWED_USER_ROLES:
+            raise ValueError("Unsupported user role")
+        return role
+
+    @field_validator("status")
+    @classmethod
+    def validate_optional_status(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        status = value.strip().lower()
+        if status not in ALLOWED_USER_STATUSES:
+            raise ValueError("Unsupported user status")
+        return status
+
+
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str = Field(min_length=1)
 
 
 

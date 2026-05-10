@@ -2,8 +2,8 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.security import decode_access_token
-from app.core.errors import unauthorized
-from app.core.users import USER_STATUS_ACTIVE
+from app.core.errors import forbidden, unauthorized
+from app.core.users import USER_ROLE_ADMIN, USER_STATUS_ACTIVE
 from app.infrastructure.users_repository import UserRecord, UsersRepository
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -41,3 +41,15 @@ def get_current_user(
 
 def get_current_username(current_user: UserRecord = Depends(get_current_user)) -> str:
     return current_user.username
+
+
+def get_current_admin_user(
+    current_user: UserRecord = Depends(get_current_user),
+) -> UserRecord:
+    return require_admin(current_user)
+
+
+def require_admin(current_user: UserRecord = Depends(get_current_user)) -> UserRecord:
+    if current_user.role != USER_ROLE_ADMIN:
+        raise forbidden("Admin privileges required")
+    return current_user
