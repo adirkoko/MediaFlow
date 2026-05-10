@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes_admin_jobs import router as admin_jobs_router
 from app.api.routes_admin_quotas import router as admin_quotas_router
+from app.api.routes_admin_registration_requests import router as admin_registration_requests_router
 from app.api.routes_admin_security import router as admin_security_router
 from app.api.routes_admin_users import router as admin_users_router
 from app.api.routes_admin_usage import router as admin_usage_router
@@ -41,6 +42,7 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(admin_users_router)
 app.include_router(admin_jobs_router)
+app.include_router(admin_registration_requests_router)
 app.include_router(admin_quotas_router)
 app.include_router(admin_usage_router)
 app.include_router(admin_security_router)

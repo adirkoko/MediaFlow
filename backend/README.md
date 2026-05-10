@@ -14,6 +14,7 @@ This repository is intentionally **not** an enterprise platform. It is a lightwe
 ## Features
 
 - **Authenticated access** (username/password -> JWT Bearer token).
+- **Admin-approved access requests**: visitors can request access, but only admins can create accounts from approved requests.
 - **Admin user management API** for DB-backed users (create/update/disable/enable/soft-delete/reset password/revoke tokens).
 - **Jobs API** for single videos or playlists:
   - Preview endpoint before job creation (title, thumbnail, playlist/video basics, available video qualities when yt-dlp can resolve them)
@@ -64,6 +65,7 @@ backend/
     api/
       routes_admin_quotas.py
       routes_admin_jobs.py
+      routes_admin_registration_requests.py
       routes_admin_security.py
       routes_admin_users.py
       routes_admin_usage.py
@@ -84,6 +86,7 @@ backend/
       db.py
       jobs_store.py
       quotas_repository.py
+      registration_requests_repository.py
       security_repository.py
       usage_repository.py
       users_repository.py
@@ -100,6 +103,7 @@ backend/
       packaging.py
       quota_service.py
       rate_limiter.py
+      registration_requests_service.py
       reporting.py
       usage_service.py
       worker.py
@@ -278,6 +282,11 @@ Common settings:
 | `LOGIN_BLOCK_MINUTES` | `15` | Suggested retry delay returned for blocked logins |
 | `JOB_CREATE_RATE_LIMIT_PER_MINUTE` | `20` | Per-user in-memory rate limit for `POST /jobs` |
 | `JOB_PREVIEW_RATE_LIMIT_PER_MINUTE` | `30` | Per-user in-memory rate limit for `POST /jobs/preview` |
+| `REGISTRATION_REQUESTS_ENABLED` | `true` | Enable unauthenticated admin-approved access requests |
+| `REGISTRATION_RATE_LIMIT_PER_IP_PER_HOUR` | `5` | Access request limit per IP hash per hour |
+| `REGISTRATION_RATE_LIMIT_PER_IP_PER_DAY` | `20` | Access request limit per IP hash per day |
+| `REGISTRATION_MAX_PENDING_PER_IP` | `3` | Maximum pending access requests per IP hash |
+| `REGISTRATION_MESSAGE_MAX_LENGTH` | `500` | Maximum optional access request message length |
 | `OUTPUTS_TTL_HOURS` | `24` | Output folder time-to-live (hours) |
 | `OUTPUTS_TTL_MINUTES` | `0` | Minutes override for TTL. Use `0` to disable minutes and fall back to `OUTPUTS_TTL_HOURS`. |
 | `OUTPUTS_CLEANUP_INTERVAL_MINUTES` | `60` | Cleanup scheduler interval |
@@ -326,6 +335,30 @@ In `/docs` click **Authorize** and paste:
 ```
 Bearer <access_token>
 ```
+
+## Registration Requests
+
+MediaFlow does not provide open self-service registration. Unauthenticated
+visitors may submit an access request, but the account is not created and the
+requester cannot log in until an admin approves it.
+
+- `POST /auth/register-request` accepts `username`, `password`, optional `email`, and optional `message`.
+- Usernames are normalized to lowercase and limited to English letters, digits, `.`, `_`, and `-` (`2-32` characters).
+- Passwords are hashed before storage and are never returned by APIs.
+- Emails are optional, normalized to lowercase, and checked case-insensitively.
+- Duplicate existing users and duplicate pending requests are rejected.
+- Rejected requests do not create users; a later request for the same username may be submitted if there is no pending request.
+- Request IPs are stored only as hashes and are rate-limited by hour, day, and pending count.
+
+Admin review endpoints require `role="admin"`:
+
+- `GET /admin/registration-requests`
+- `POST /admin/registration-requests/{request_id}/approve`
+- `POST /admin/registration-requests/{request_id}/reject`
+
+Approval creates an active `role="user"` account from the hashed password in the
+request. Rejection stores an optional reason and does not create a user. Both
+actions write audit log entries without plaintext passwords or password hashes.
 
 ### Migrating Legacy `users.json`
 
@@ -402,6 +435,9 @@ a later upgrade.
 
 ### Admin Quota, Usage, and Security APIs
 
+- `GET /admin/registration-requests`
+- `POST /admin/registration-requests/{request_id}/approve`
+- `POST /admin/registration-requests/{request_id}/reject`
 - `GET /admin/quotas/roles`
 - `GET /admin/quotas/roles/{role}`
 - `PATCH /admin/quotas/roles/{role}`
@@ -449,6 +485,9 @@ Users can inspect their own limits with:
 - `GET /me/usage/daily` -- per-day usage rows
 - `GET /me/limits` -- effective quota, usage, and remaining limits
 
+### Access Requests
+- `POST /auth/register-request` -- submit a pending access request; admin approval is required before login.
+
 ### Admin Users
 - `GET /admin/users`
 - `POST /admin/users`
@@ -461,6 +500,9 @@ Users can inspect their own limits with:
 - `POST /admin/users/{user_id}/revoke-tokens`
 
 ### Admin Quotas, Usage, and Security
+- `GET /admin/registration-requests`
+- `POST /admin/registration-requests/{request_id}/approve`
+- `POST /admin/registration-requests/{request_id}/reject`
 - `GET /admin/quotas/roles`
 - `PATCH /admin/quotas/roles/{role}`
 - `GET /admin/users/{user_id}/quota`

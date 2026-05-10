@@ -33,6 +33,7 @@ const QUOTA_FIELDS = [
 const NAV = [
   ["/admin", "Dashboard", "dashboard"],
   ["/admin/users", "Users", "users"],
+  ["/admin/registration-requests", "Access Requests", "registration"],
   ["/admin/jobs", "Jobs", "jobs"],
   ["/admin/usage", "Usage", "usage"],
   ["/admin/quotas", "Quotas", "quotas"],
@@ -121,6 +122,11 @@ function resolveRoute() {
     "/admin": { key: "dashboard", title: "Dashboard", render: renderDashboard },
     "/admin/dashboard": { key: "dashboard", title: "Dashboard", render: renderDashboard },
     "/admin/users": { key: "users", title: "Users", render: renderUsers },
+    "/admin/registration-requests": {
+      key: "registration",
+      title: "Access Requests",
+      render: renderRegistrationRequests,
+    },
     "/admin/jobs": { key: "jobs", title: "Jobs", render: renderJobsAdmin },
     "/admin/usage": { key: "usage", title: "Usage", render: renderUsage },
     "/admin/quotas": { key: "quotas", title: "Quotas", render: renderQuotas },
@@ -341,6 +347,57 @@ async function renderUsers() {
   });
 
   bindUserActionButtons();
+}
+
+async function renderRegistrationRequests() {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get("status") || "pending";
+  const requests = await adminApi.listRegistrationRequests({ status, limit: 100 });
+
+  renderShell(
+    "registration",
+    "Access Requests",
+    `
+      <section class="panel p-4">
+        <form id="admin-registration-filters" class="grid gap-3 md:grid-cols-[180px_auto] md:items-end">
+          ${selectField("status", "Status", status, ["pending", "all", "approved", "rejected"])}
+          <button class="btn-primary h-10 px-4 text-sm" type="submit">Apply</button>
+        </form>
+      </section>
+      <section class="panel overflow-hidden">
+        ${registrationRequestsTable(requests)}
+      </section>
+    `,
+  );
+
+  document.getElementById("admin-registration-filters")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const value = String(new FormData(event.currentTarget).get("status") || "pending");
+    navigate(`/admin/registration-requests?status=${encodeURIComponent(value)}`);
+  });
+
+  document.querySelectorAll("[data-registration-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const action = button.dataset.registrationAction;
+      const requestId = button.dataset.registrationId;
+      try {
+        if (action === "approve") {
+          if (!window.confirm("Approve this access request and create a standard user account?")) return;
+          await adminApi.approveRegistrationRequest(requestId);
+          setFlash("Access request approved and user created.", "success");
+        } else if (action === "reject") {
+          if (!window.confirm("Reject this access request?")) return;
+          const reason = window.prompt("Optional rejection reason") || "";
+          await adminApi.rejectRegistrationRequest(requestId, reason);
+          setFlash("Access request rejected.", "success");
+        }
+        renderRegistrationRequests();
+      } catch (err) {
+        setFlash(err.message, "error");
+        renderRegistrationRequests();
+      }
+    });
+  });
 }
 
 async function renderUserDetail(userId) {
@@ -617,6 +674,42 @@ function usersTable(users) {
                   <button class="btn px-2 py-1 text-xs" data-user-action="revoke" data-user-id="${h(user.id)}">Revoke</button>
                   <button class="btn danger-soft px-2 py-1 text-xs" data-user-action="delete" data-user-id="${h(user.id)}">Delete</button>
                 </div>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function registrationRequestsTable(requests) {
+  if (!requests.length) return emptyState("No access requests found");
+  return `
+    <div class="overflow-auto">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Username</th><th>Email</th><th>Message</th><th>Requested</th><th>Status</th><th>Decision</th><th>IP hash</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${requests.map((request) => `
+            <tr>
+              <td class="font-semibold text-slate-950">${h(request.username)}</td>
+              <td>${h(request.email || "--")}</td>
+              <td class="max-w-md">${h(request.message || "--")}</td>
+              <td>${timestampHtml(request.requested_at)}</td>
+              <td>${statusBadge(request.status)}</td>
+              <td>${h(request.decision_reason || "--")}</td>
+              <td class="font-mono text-xs">${h(request.request_ip_hash || "--")}</td>
+              <td>
+                ${request.status === "pending" ? `
+                  <div class="flex min-w-[160px] flex-wrap gap-2">
+                    <button class="btn px-2 py-1 text-xs" data-registration-action="approve" data-registration-id="${h(request.id)}">Approve</button>
+                    <button class="btn danger-soft px-2 py-1 text-xs" data-registration-action="reject" data-registration-id="${h(request.id)}">Reject</button>
+                  </div>
+                ` : "--"}
               </td>
             </tr>
           `).join("")}
@@ -1049,10 +1142,13 @@ function roleBadge(role) {
 function statusBadge(status) {
   const tones = {
     active: "bg-emerald-50 text-emerald-700",
+    approved: "bg-emerald-50 text-emerald-700",
     success: "bg-emerald-50 text-emerald-700",
     succeeded: "bg-emerald-50 text-emerald-700",
+    pending: "bg-amber-50 text-amber-700",
     running: "bg-blue-50 text-blue-700",
     queued: "bg-amber-50 text-amber-700",
+    rejected: "bg-rose-50 text-rose-700",
     disabled: "bg-slate-100 text-slate-700",
     locked: "bg-orange-50 text-orange-700",
     deleted: "bg-rose-50 text-rose-700",

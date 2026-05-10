@@ -1,11 +1,11 @@
 # MediaFlow
 
-MediaFlow is a small full-stack tool for authorized users to preview YouTube links, choose audio or video output, process downloads in the backend, and track job progress from a clean one-page UI.
+MediaFlow is a small full-stack tool for authorized users to preview YouTube links, choose audio or video output, process downloads in the backend, and track job progress from a clean one-page UI. New users can submit admin-approved access requests; this is not open self-service registration.
 
 ## Components
 
-- `backend/`: FastAPI service for auth, admin users, quotas, jobs, download processing, and usage tracking.
-- `frontend/`: Vite-built web UI (served by nginx in Docker) with the normal download flow plus an admin dashboard at `/admin`.
+- `backend/`: FastAPI service for auth, controlled access requests, admin users, quotas, jobs, download processing, and usage tracking.
+- `frontend/`: Vite-built web UI (served by nginx in Docker) with login, access request submission, the normal download flow, and an admin dashboard at `/admin`.
 
 ## Documentation
 
@@ -66,3 +66,4 @@ The main production knobs are in [.env.production.example](./.env.production.exa
 - `MEDIAFLOW_PUBLIC_URL` for absolute social preview metadata.
 - `MEDIAFLOW_NODE_PATH` and `MEDIAFLOW_YTDLP_REMOTE_COMPONENTS` for yt-dlp YouTube processing behavior.
 - `MEDIAFLOW_LOGIN_*` and `MEDIAFLOW_JOB_*_RATE_LIMIT_PER_MINUTE` for backend anti-abuse controls.
+- `MEDIAFLOW_REGISTRATION_*` for admin-approved access request controls.

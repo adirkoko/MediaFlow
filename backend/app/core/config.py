@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     job_create_rate_limit_per_minute: int = 20
     job_preview_rate_limit_per_minute: int = 30
 
+    # Controlled access request flow
+    registration_requests_enabled: bool = True
+    registration_rate_limit_per_ip_per_hour: int = 5
+    registration_rate_limit_per_ip_per_day: int = 20
+    registration_max_pending_per_ip: int = 3
+    registration_message_max_length: int = 500
+
     # Backoff
     max_attempts: int = 4
     backoff_base_seconds: float = 2.0

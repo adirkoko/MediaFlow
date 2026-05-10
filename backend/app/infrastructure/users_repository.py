@@ -12,6 +12,7 @@ from app.core.users import (
     USER_STATUS_ACTIVE,
     USER_STATUS_DELETED,
 )
+from app.core.registration import normalize_email, normalize_username
 from app.infrastructure.db import get_conn
 
 
@@ -61,15 +62,18 @@ class UsersRepository:
             return _row_to_user(row)
 
     def get_user_by_username(self, username: str) -> UserRecord | None:
+        clean_username = normalize_username(username)
+        if not clean_username:
+            return None
         with get_conn() as conn:
             row = conn.execute(
-                "SELECT * FROM users WHERE username = ?",
-                (username.strip(),),
+                "SELECT * FROM users WHERE lower(username) = ?",
+                (clean_username,),
             ).fetchone()
             return _row_to_user(row)
 
     def get_user_by_email(self, email: str) -> UserRecord | None:
-        clean_email = email.strip().lower()
+        clean_email = normalize_email(email)
         if not clean_email:
             return None
 
@@ -137,13 +141,13 @@ class UsersRepository:
         role: str = USER_ROLE_USER,
         status: str = USER_STATUS_ACTIVE,
     ) -> UserRecord:
-        clean_username = username.strip()
+        clean_username = normalize_username(username)
         if not clean_username:
             raise ValueError("username is required")
         if not password_hash:
             raise ValueError("password_hash is required")
 
-        clean_email = email.strip() if isinstance(email, str) and email.strip() else None
+        clean_email = normalize_email(email)
         clean_role = _validate_role(role)
         clean_status = _validate_status(status)
         now = _utc_now()
@@ -204,17 +208,13 @@ class UsersRepository:
             if key not in allowed:
                 raise ValueError(f"Unsupported user field: {key}")
             if key == "username":
-                clean_username = str(value or "").strip()
+                clean_username = normalize_username(str(value or ""))
                 if not clean_username:
                     raise ValueError("username is required")
                 updates.append("username = ?")
                 args.append(clean_username)
             elif key == "email":
-                clean_email = (
-                    str(value).strip()
-                    if isinstance(value, str) and str(value).strip()
-                    else None
-                )
+                clean_email = normalize_email(str(value) if value is not None else None)
                 updates.append("email = ?")
                 args.append(clean_email)
             elif key == "role":

@@ -48,6 +48,20 @@ export const adminApi = {
   revokeTokens(userId) {
     return api(`/admin/users/${encodeURIComponent(userId)}/revoke-tokens`, { method: "POST" });
   },
+  listRegistrationRequests(params) {
+    return api(withQuery("/admin/registration-requests", params));
+  },
+  approveRegistrationRequest(requestId) {
+    return api(`/admin/registration-requests/${encodeURIComponent(requestId)}/approve`, {
+      method: "POST",
+    });
+  },
+  rejectRegistrationRequest(requestId, reason) {
+    return api(
+      `/admin/registration-requests/${encodeURIComponent(requestId)}/reject`,
+      jsonOptions("POST", { reason }),
+    );
+  },
   listRoleQuotas() {
     return api("/admin/quotas/roles");
   },

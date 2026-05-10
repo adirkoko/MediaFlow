@@ -54,7 +54,7 @@
           </div>
         </div>
 
-        <div class="grid gap-2 sm:grid-cols-[minmax(0,150px)_minmax(0,150px)_auto_auto_auto]">
+        <div class="grid gap-2 sm:grid-cols-[minmax(0,150px)_minmax(0,150px)_auto_auto_auto_auto]">
           <input
             id="username"
             class="h-10 rounded-lg border border-slate-200 bg-white/85 px-3 text-sm outline-none focus:border-emerald-400"
@@ -71,7 +71,8 @@
           <button id="btn-login" class="btn-primary h-10 px-4 text-sm font-medium">Login</button>
           <button id="btn-logout" class="btn h-10 px-4 text-sm font-medium">Logout</button>
           <a id="admin-link" href="/admin" class="btn h-10 px-4 text-center text-sm font-medium">Admin</a>
-          <div id="auth-message" class="hidden text-sm sm:col-span-5"></div>
+          <button id="btn-request-access" class="btn h-10 px-4 text-sm font-medium" type="button">Request access</button>
+          <div id="auth-message" class="hidden text-sm sm:col-span-6"></div>
         </div>
       </header>
 

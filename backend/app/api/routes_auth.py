@@ -4,8 +4,14 @@ from app.core.errors import unauthorized
 from app.core.security import create_access_token, verify_password
 from app.core.users import USER_STATUS_ACTIVE
 from app.infrastructure.users_repository import UsersRepository
-from app.models.schemas import LoginRequest, TokenResponse
+from app.models.schemas import (
+    LoginRequest,
+    RegistrationRequestCreate,
+    RegistrationRequestSubmitResponse,
+    TokenResponse,
+)
 from app.services.login_protection import LoginProtectionService
+from app.services.registration_requests_service import RegistrationRequestsService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -41,4 +47,19 @@ def login(payload: LoginRequest, request: Request = None) -> TokenResponse:
         },
     )
     return TokenResponse(access_token=token)
+
+
+@router.post("/register-request", response_model=RegistrationRequestSubmitResponse)
+def register_request(
+    payload: RegistrationRequestCreate,
+    request: Request = None,
+) -> RegistrationRequestSubmitResponse:
+    RegistrationRequestsService().submit_request(
+        username=payload.username,
+        password=payload.password,
+        email=payload.email,
+        message=payload.message,
+        request=request,
+    )
+    return RegistrationRequestSubmitResponse()
 

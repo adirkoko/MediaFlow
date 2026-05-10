@@ -1,7 +1,10 @@
 # backend/app/models/schemas.py
 from enum import Enum
+import re
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.core.registration import USERNAME_PATTERN
 from app.core.users import ALLOWED_USER_ROLES, ALLOWED_USER_STATUSES, USER_STATUS_DELETED
 from app.services.download_validation import validate_download_request, validate_youtube_url
 
@@ -14,6 +17,48 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class RegistrationRequestCreate(BaseModel):
+    username: str = Field(min_length=2, max_length=32)
+    password: str = Field(min_length=4, max_length=64)
+    email: str | None = Field(default=None, max_length=254)
+    message: str | None = Field(default=None, max_length=500)
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        clean = value.strip().lower()
+        if not USERNAME_PATTERN.fullmatch(clean):
+            raise ValueError(
+                "Username must use only letters, numbers, dot, underscore, or dash"
+            )
+        return clean
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        clean = value.strip().lower()
+        if not clean:
+            return None
+        if len(clean) > 254 or not re.fullmatch(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", clean):
+            raise ValueError("Email is invalid")
+        return clean
+
+    @field_validator("message")
+    @classmethod
+    def normalize_message(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        clean = value.strip()
+        return clean or None
+
+
+class RegistrationRequestSubmitResponse(BaseModel):
+    status: str = "pending"
+    message: str = "Registration request submitted and is pending admin approval."
 
 
 class HealthResponse(BaseModel):
@@ -187,6 +232,34 @@ class AdminUpdateUserRequest(BaseModel):
 
 class AdminResetPasswordRequest(BaseModel):
     new_password: str = Field(min_length=1)
+
+
+class AdminRegistrationRequestResponse(BaseModel):
+    id: int
+    username: str
+    email: str | None = None
+    message: str | None = None
+    status: str
+    requested_at: str
+    reviewed_at: str | None = None
+    reviewed_by_user_id: str | None = None
+    decision_reason: str | None = None
+    request_ip_hash: str | None = None
+    user_agent: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class AdminRejectRegistrationRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        clean = value.strip()
+        return clean or None
 
 
 class QuotaUpdateRequest(BaseModel):

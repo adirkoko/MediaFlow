@@ -8,6 +8,7 @@ export const els = {
   tokenPill: document.getElementById("token-pill"),
   btnLogin: document.getElementById("btn-login"),
   btnLogout: document.getElementById("btn-logout"),
+  btnRequestAccess: document.getElementById("btn-request-access"),
   adminLink: document.getElementById("admin-link"),
   jobUrl: document.getElementById("job-url"),
   btnPreview: document.getElementById("btn-preview"),

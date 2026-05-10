@@ -80,6 +80,7 @@ def ensure_db_initialized() -> None:
         _ensure_quota_tables(conn)
         _ensure_usage_tables(conn)
         _ensure_login_attempts_table(conn)
+        _ensure_registration_requests_table(conn)
 
         conn.execute(
             """
@@ -288,6 +289,51 @@ def _ensure_login_attempts_table(conn: sqlite3.Connection) -> None:
     try:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_login_attempts_username_created ON login_attempts(username, created_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_login_attempts_ip_created ON login_attempts(ip_hash, created_at);")
+    except sqlite3.OperationalError:
+        pass
+
+
+def _ensure_registration_requests_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS registration_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            username_normalized TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            email TEXT,
+            email_normalized TEXT,
+            message TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            requested_at TEXT NOT NULL,
+            reviewed_at TEXT,
+            reviewed_by_user_id TEXT,
+            decision_reason TEXT,
+            request_ip_hash TEXT,
+            user_agent TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+    try:
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_registration_pending_username
+            ON registration_requests(username_normalized)
+            WHERE status = 'pending';
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_registration_pending_email
+            ON registration_requests(email_normalized)
+            WHERE status = 'pending' AND email_normalized IS NOT NULL;
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_registration_status ON registration_requests(status);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_registration_requested_at ON registration_requests(requested_at);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_registration_ip ON registration_requests(request_ip_hash);")
     except sqlite3.OperationalError:
         pass
 

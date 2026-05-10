@@ -1,5 +1,6 @@
 import "./styles/main.css";
 
+import { openAccessRequestForm } from "./access_request.js";
 import { initAdminRouter } from "./admin/index.js";
 import { login, logout, updateTokenStatus } from "./auth.js";
 import { updateApiBadge } from "./config.js";
@@ -35,6 +36,7 @@ function bindEvents() {
   });
 
   els.btnLogout.addEventListener("click", logout);
+  els.btnRequestAccess.addEventListener("click", openAccessRequestForm);
 
   els.jobUrl.addEventListener("input", schedulePreview);
   els.btnPreview.addEventListener("click", async () => {

@@ -10,7 +10,7 @@ export function updateTokenStatus() {
   const present = Boolean(getToken());
   const user = getCurrentUserFromToken();
   els.tokenPill.textContent = present
-    ? `Signed in${user?.role === "admin" ? " · admin" : ""}`
+    ? `Signed in${user?.role === "admin" ? " - admin" : ""}`
     : "Signed out";
   els.tokenPill.className = present
     ? "rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700"

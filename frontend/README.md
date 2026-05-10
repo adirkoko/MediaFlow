@@ -4,13 +4,13 @@ The MediaFlow frontend is a Vite-built single-page web UI served by nginx in Doc
 
 ## Features
 
-- One-page flow for login, link preview, output selection, job progress, recent jobs, and download actions.
+- One-page flow for login, admin-approved access requests, link preview, output selection, job progress, recent jobs, and download actions.
 - YouTube preview before job creation, including title, thumbnail, basic metadata, and available video qualities when the backend can resolve them.
 - Audio/video selection with `quality=best` for audio and explicit quality choices for video.
 - Live job progress through the backend SSE endpoint.
 - Contextual inline errors for auth, preview, jobs, and the selected job.
 - Copy Job JSON action with a short toast confirmation.
-- Admin dashboard under `/admin` for users, quotas, usage, jobs, security events, and audit logs.
+- Admin dashboard under `/admin` for access requests, users, quotas, usage, jobs, security events, and audit logs.
 - Open Graph/Twitter metadata, favicon, home-screen icons, and web manifest assets.
 
 ## Tech Stack
@@ -33,6 +33,7 @@ frontend/
     session.js
     state.js
     auth.js
+    access_request.js
     preview.js
     admin/
       api.js
@@ -89,6 +90,7 @@ The frontend uses that role only for client-side routing; backend admin APIs rem
 Dashboard routes:
 
 - `/admin` -- operational overview.
+- `/admin/registration-requests` -- approve or reject pending access requests.
 - `/admin/users` and `/admin/users/:userId` -- user management, password reset, token revocation, usage, and quota override editing.
 - `/admin/quotas` -- role quota defaults and a jump point for user overrides.
 - `/admin/usage` -- today/week/month summaries, heavy users, and quota exceeded events.
@@ -96,7 +98,9 @@ Dashboard routes:
 - `/admin/security` -- login attempts and blocked login windows.
 - `/admin/audit` -- admin/security audit log inspection.
 
-Soft delete, disable, password reset, token revoke, job cancel, and broad role quota updates require confirmation in the UI. Password hashes, JWTs, cookies, and plaintext passwords are not displayed.
+The login screen includes a `Request access` form for unauthenticated visitors. Submitting a request does not log the requester in; an admin must approve it first.
+
+Soft delete, disable, password reset, token revoke, access request approval/rejection, job cancel, and broad role quota updates require confirmation in the UI. Password hashes, JWTs, cookies, and plaintext passwords are not displayed.
 
 ## Production Build
 
